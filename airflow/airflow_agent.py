@@ -282,6 +282,7 @@ if __name__ == "__main__":
     airflow_legacy_dags_dir = project_root / "airflow" / "data-airflow-legacy" / "dags"
     
     options = ClaudeAgentOptions(
+        system_prompt="claude_code",
         setting_sources=["project"],  # Look for .claude/settings.json at project root
         cwd=str(output_dir),  # Set working directory to output location
         add_dirs=[

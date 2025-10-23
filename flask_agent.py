@@ -91,7 +91,7 @@ class ConversationSession:
         thinking_count = 0
         files_created = []
 
-        async for message in query(prompt=main_prompt, options=self.options):
+        async for message in self.client.query(prompt=main_prompt):
             display_message(message)
 
             if isinstance(message, AssistantMessage):
@@ -154,6 +154,7 @@ if __name__ == "__main__":
     airflow_dags_dir = project_root / "airflow" / "data-airflow-legacy" / "dags"
     
     options = ClaudeAgentOptions(
+        system_prompt="claude_code",
         setting_sources=["project"],  # This tells SDK to look for .claude/settings.json at project root
         cwd=str(output_dir),  # Set working directory to output location where files will be created
         add_dirs=[str(airflow_dags_dir)],  # Grant access to airflow DAGs directory
@@ -169,6 +170,12 @@ if __name__ == "__main__":
         "PYTHONPATH": "/home/dev/.pyenv/versions/3.13.5/bin/python3",
     },
         agents={
+            "app-archtiect": AgentDefinition(
+                description="Expert Web App Archtiect.",
+                prompt=main_prompt,
+                tools=["Read", "Write", "Edit", "Bash"],
+                model="sonnet",
+            ),
             "flask-developer": AgentDefinition(
                 description="Expert Flask developer.",
                 prompt=flask_dev_prompt,

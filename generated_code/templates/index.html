@@ -3,129 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <title>Hello World - Flask App</title>
   <style>
+    /* Reset default margins and padding */
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
 
+    /* Body styling with flexbox for centering */
     body {
-      min-height: 100vh;
+      height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: Arial, sans-serif;
       overflow: hidden;
-      position: relative;
     }
 
-    body::before {
-      content: '';
-      position: absolute;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-      background-size: 50px 50px;
-      animation: backgroundMove 20s linear infinite;
-      opacity: 0.3;
-    }
-
-    @keyframes backgroundMove {
-      0% {
-        transform: translate(0, 0);
-      }
-      100% {
-        transform: translate(50px, 50px);
-      }
-    }
-
+    /* Container for content */
     .container {
-      position: relative;
-      z-index: 1;
       text-align: center;
       padding: 2rem;
-      background: rgba(255, 255, 255, 0.95);
+      background: rgba(255, 255, 255, 0.1);
       border-radius: 20px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       max-width: 90%;
-      animation: fadeIn 0.8s ease-in-out;
     }
 
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(-20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .hello-world {
-      color: {{ color }};
-      font-size: {{ font_size }}px;
-      font-family: {{ font_family }}, sans-serif;
-      font-weight: bold;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-      transition: all 0.3s ease;
-      line-height: 1.4;
+    /* Main heading with dynamic styling from Flask */
+    h1 {
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      margin: 0;
+      line-height: 1.2;
       word-wrap: break-word;
     }
 
-    .hello-world:hover {
-      transform: scale(1.05);
-      text-shadow: 3px 3px 8px rgba(0, 0, 0, 0.2);
-    }
-
-    .subtitle {
-      margin-top: 1.5rem;
-      font-size: 1rem;
-      color: #666;
-      font-weight: 300;
-      letter-spacing: 0.5px;
-    }
-
-    .info {
-      margin-top: 2rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid rgba(0, 0, 0, 0.1);
-      font-size: 0.875rem;
-      color: #888;
-    }
-
-    .info-item {
-      margin: 0.5rem 0;
-    }
-
-    .info-label {
-      font-weight: 600;
-      color: #555;
-    }
-
-    /* Responsive Design */
+    /* Responsive design for smaller screens */
     @media (max-width: 768px) {
       .container {
         padding: 1.5rem;
         border-radius: 15px;
-        max-width: 95%;
-      }
-
-      .hello-world {
-        font-size: calc({{ font_size }}px * 0.7);
-      }
-
-      .subtitle {
-        font-size: 0.875rem;
-      }
-
-      .info {
-        font-size: 0.75rem;
       }
     }
 
@@ -134,56 +55,16 @@
         padding: 1rem;
         border-radius: 10px;
       }
-
-      .hello-world {
-        font-size: calc({{ font_size }}px * 0.5);
-      }
-
-      .subtitle {
-        font-size: 0.75rem;
-        margin-top: 1rem;
-      }
-
-      .info {
-        margin-top: 1.5rem;
-        padding-top: 1rem;
-      }
-    }
-
-    /* High contrast mode support */
-    @media (prefers-contrast: high) {
-      .container {
-        background: white;
-        border: 2px solid #333;
-      }
-    }
-
-    /* Reduced motion support */
-    @media (prefers-reduced-motion: reduce) {
-      * {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
     }
   </style>
 </head>
 <body>
-  <main class="container">
-    <h1 class="hello-world">Hello World</h1>
-    <p class="subtitle">Dynamically styled with Flask</p>
-    <section class="info" aria-label="Current styling information">
-      <div class="info-item">
-        <span class="info-label">Color:</span> {{ color }}
-      </div>
-      <div class="info-item">
-        <span class="info-label">Font Size:</span> {{ font_size }}px
-      </div>
-      <div class="info-item">
-        <span class="info-label">Font Family:</span> {{ font_family }}
-      </div>
-      <p style="margin-top: 1rem; font-style: italic;">Refresh the page for new random styling!</p>
-    </section>
-  </main>
+  <!-- Main content container -->
+  <div class="container">
+    <!-- Dynamic "Hello World" heading with Flask template variables -->
+    <h1 style="color: {{ color }}; font-size: {{ font_size }}; font-family: {{ font_family }};">
+      Hello World
+    </h1>
+  </div>
 </body>
 </html>

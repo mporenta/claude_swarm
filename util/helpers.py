@@ -3,6 +3,8 @@ from pathlib import Path
 import re, os
 from datetime import datetime
 from dotenv import load_dotenv
+
+load_dotenv()
 from rich import print
 from rich.console import Console
 from claude_agent_sdk import (
@@ -15,62 +17,77 @@ from claude_agent_sdk import (
     UserMessage,
     SystemMessage,
 )
-load_dotenv()
+
+
 from log_set import logger, log_config
 
-SET_DEBUG = os.getenv("SET_DEBUG", "False").lower() in ("true", "1", "yes")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+print(f"[dim]Helper LOG_LEVEL: {LOG_LEVEL}[/dim]")
 
-def display_message(msg, debug: bool=SET_DEBUG):
+
+def display_message(msg, debug: str = LOG_LEVEL):
     """Claude SDK standardized message display function with status indicators."""
     try:
-        debug=True
+        debug = True if LOG_LEVEL == "DEBUG" else False
+        # print(f"[dim]Display Message LOG_LEVEL:{LOG_LEVEL} debug: {debug}[/dim]")
+
         timestamp = datetime.now().strftime("%H:%M:%S")
         console = Console()
-        debug_print= print(msg)
         if debug:
-            log_config.setup()
+
             logger.debug(f"message log: {msg}")
             console.print(f"[dim]Debug: Displaying message at {timestamp}[/dim]")
             console.print(msg)
 
-        
-        
         if isinstance(msg, UserMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock):
                     console.print(f"[cyan]🧑 [{timestamp}] User:[/cyan] {block.text}")
-        
+
         elif isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock):
-                    console.print(f"[green]🤖 [{timestamp}] Claude:[/green] {block.text}")
-                
+                    console.print(
+                        f"[green]🤖 [{timestamp}] Claude:[/green] {block.text}"
+                    )
+
                 elif isinstance(block, ThinkingBlock):
-                    console.print(f"[yellow]💭 [{timestamp}] Thinking:[/yellow] {block.thinking[:100]}...")
-                
+                    console.print(
+                        f"[yellow]💭 [{timestamp}] Thinking:[/yellow] {block.thinking[:100]}..."
+                    )
+
                 elif isinstance(block, ToolUseBlock):
-                    console.print(f"[magenta]⚙️  [{timestamp}] Tool Use:[/magenta] {block.name}")
+                    console.print(
+                        f"[magenta]⚙️  [{timestamp}] Tool Use:[/magenta] {block.name}"
+                    )
                     console.print(f"   Input: {str(block.input)[:100]}...")
-                
+
                 elif isinstance(block, ToolResultBlock):
-                    result_preview = str(block.content)[:100] if block.content else "No content"
-                    console.print(f"[blue]✅ [{timestamp}] Tool Result:[/blue] {result_preview}...")
-        
+                    result_preview = (
+                        str(block.content)[:100] if block.content else "No content"
+                    )
+                    console.print(
+                        f"[blue]✅ [{timestamp}] Tool Result:[/blue] {result_preview}..."
+                    )
+
         elif isinstance(msg, SystemMessage):
             pass
-        
+
         elif isinstance(msg, ResultMessage):
             console.print(f"[bold green]✅ [{timestamp}] Result ended[/bold green]")
-        
+
             cost = 0.0
             if msg.total_cost_usd:
                 cost = float(msg.total_cost_usd)
                 if cost > 0:
-                    console.print(f"[bold yellow]💰 Total Cost: ${cost:.6f}[/bold yellow]")
+                    console.print(
+                        f"[bold yellow]💰 Total Cost: ${cost:.6f}[/bold yellow]"
+                    )
         else:
             console.print(msg)
     except Exception as e:
         print(f"Error displaying message: {e}")
+
 
 def load_markdown_for_prompt(relative_path: str) -> str:
     """
@@ -101,7 +118,7 @@ def load_markdown_for_prompt(relative_path: str) -> str:
         if not file_path.exists() or not file_path.is_file():
             raise FileNotFoundError(f"Markdown file not found: {file_path}")
 
-        raw_content = file_path.read_text(encoding='utf-8').strip()
+        raw_content = file_path.read_text(encoding="utf-8").strip()
 
         # Strip YAML front matter (--- ... ---)
         yaml_pattern = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)

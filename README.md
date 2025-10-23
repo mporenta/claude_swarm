@@ -6,6 +6,11 @@ A sophisticated AI-powered code generation framework that orchestrates multiple 
 
 Claude Swarm uses an orchestrator pattern where different AI agents with specialized expertise work together on complex development tasks. Each agent has specific roles, tool access, and capabilities, enabling efficient collaboration on backend development, frontend design, and code quality assurance.
 
+## Claude Doc
+
+- Refer to the documentation here for the [Claude Agent Python SDK](https://docs.claude.com/en/api/agent-sdk/python)
+- Check out the [Github Repo](https://github.com/anthropics/claude-agent-sdk-python)
+
 ## Features
 
 - **Multi-Agent Orchestration**: Coordinate specialized AI agents for different development tasks
@@ -23,33 +28,64 @@ Claude Swarm uses an orchestrator pattern where different AI agents with special
 ```
 claude_swarm/
 ├── Core Orchestration
-│   ├── flask_agent.py           # Main Flask orchestrator with conversation loop
-│   ├── client_query.py          # Alternative orchestrator with CLAUDE.md support
-│   ├── flask_app.py             # Standalone Flask app orchestrator
-│   └── test_agent.py            # Advanced code generation orchestrator
+│   └── flask_agent.py           # Main Flask orchestrator with conversation loop
+│
+├── Airflow Orchestration
+│   └── airflow/
+│       ├── airflow_agent.py     # Airflow DAG orchestrator
+│       ├── README_AIRFLOW_AGENT.md # Airflow agent documentation
+│       ├── CREATION_SUMMARY.md  # DAG creation summary
+│       ├── COMPARISON.md        # Migration comparison
+│       └── airflow_CLAUDE.md    # Airflow guidelines
+│
+├── Development & Testing
+│   └── dev/
+│       ├── client_query.py      # Alternative orchestrator with CLAUDE.md support
+│       ├── flask_app_dev.py     # Flask development orchestrator
+│       ├── test_dev.py          # Advanced code generation orchestrator
+│       └── basic_CLAUDE_fib.md  # Fibonacci implementation example
 │
 ├── Prompts & Agent Definitions
 │   └── prompts/
 │       ├── main-query.md        # Main orchestration prompt
 │       ├── flask-developer.md   # Backend developer agent role
 │       ├── frontend-developer.md # Frontend developer agent role
-│       └── code-reviewer.md     # Code reviewer agent role
+│       ├── code-reviewer.md     # Code reviewer agent role
+│       └── airflow_prompts/     # Airflow-specific agent prompts
+│           ├── airflow-orchestrator.md
+│           ├── dag-architect.md
+│           ├── dag-developer.md
+│           ├── migration-specialist.md
+│           └── airflow-code-reviewer.md
 │
 ├── Utilities
-│   ├── log_set.py               # Centralized logging configuration
 │   └── util/
+│       ├── log_set.py           # Centralized logging configuration
 │       └── helpers.py           # Display and markdown loading utilities
+│
+├── Examples
+│   └── examples/                # 12 official Claude Agent SDK examples
+│       ├── quick_start.py
+│       ├── agents.py
+│       ├── streaming_mode.py
+│       └── README.md            # Links to official SDK examples
 │
 ├── Configuration
 │   ├── requirements.txt         # Python dependencies
+│   ├── .env.example             # Example environment variables
+│   ├── CLAUDE.md                # Core agent orchestration guidelines
 │   ├── flask_CLAUDE.md          # Flask orchestration guidelines
-│   └── airflow_CLAUDE.md        # Airflow-specific guidelines
+│   ├── pyproject.toml           # Project metadata
+│   └── .gitignore               # Git ignore patterns
+│
+├── Logs
+│   └── logs/                    # Application logs (date-stamped)
 │
 └── Output
-    └── generated_code/          # Generated Flask applications
-        ├── app.py
-        ├── requirements.txt
-        └── templates/
+    └── generated_code/          # Generated applications (Flask, Airflow DAGs)
+        ├── app.py               # (Generated on demand)
+        ├── requirements.txt     # (Generated on demand)
+        └── templates/           # (Generated on demand)
             └── index.html
 ```
 
@@ -85,25 +121,88 @@ claude_swarm/
   - flake8 linting execution
   - Best practices validation
 
+## Airflow Agents (Beta)
+**Yes, the Airflow Agents are Beta...**
+
+### @dag-architect
+- **Purpose**: Airflow DAG architecture and design expert
+- **Tools**: Read, Grep, Glob
+- **Capabilities**:
+  - DAG structure design
+  - Task dependency planning
+  - Scheduling and configuration
+  - Best practices for Airflow workflows
+
+### @dag-developer
+- **Purpose**: Airflow DAG implementation specialist
+- **Tools**: Read, Write, Edit, Bash, Grep
+- **Capabilities**:
+  - DAG code implementation
+  - Task creation and configuration
+  - Operator selection and usage
+  - Connection and variable management
+
+### @migration-specialist
+- **Purpose**: Airflow 1.0 to 2.0 migration expert
+- **Tools**: Read, Write, Edit, Grep, Glob
+- **Capabilities**:
+  - Legacy code analysis
+  - Migration path planning
+  - Code modernization
+  - Compatibility issue resolution
+
+### @airflow-code-reviewer
+- **Purpose**: Airflow-specific code quality reviewer
+- **Tools**: Read, Grep, Glob
+- **Capabilities**:
+  - Airflow best practices verification
+  - DAG structure validation
+  - Performance optimization
+  - Security and compliance checks
+
 ## Installation
 
 ### Prerequisites
 - Python 3.8+
-- Claude API access
+- Claude API access (Anthropic API key)
 
 ### Setup
 
 ```bash
 # Clone the repository
-cd /home/dev/claude_swarm
+cd {root_path}/claude_swarm
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Set up environment variables (optional)
+# Set up environment variables (REQUIRED)
+# Copy the example .env file and add your API key
+cp .env.example .env
+# Edit .env and add your ANTHROPIC_API_KEY
+
+# Or set environment variables manually
+export ANTHROPIC_API_KEY="your-api-key-here"
 export LOG_LEVEL=DEBUG
 export SET_DEBUG=false
 ```
+
+### Environment Configuration
+
+The system requires a `.env` file in the project root directory with your Anthropic API key. This is **mandatory** for the Claude Agent SDK to function.
+
+**Required Environment Variables:**
+- `ANTHROPIC_API_KEY` - Your Anthropic API key (obtain from https://console.anthropic.com/)
+
+**Optional Environment Variables:**
+- `LOG_LEVEL` - Logging verbosity: DEBUG, INFO, WARNING, ERROR (default: INFO)
+- `SET_DEBUG` - Enable debug output: true/false (default: false)
+- `CLAUDE_MODEL` - Model selection: sonnet, opus, haiku (default: sonnet)
+- `FLASK_ENV` - Flask environment: development, production (default: development)
+- `FLASK_PROJECT_PATH` - Custom path for Flask generated code
+- `AIRFLOW_HOME` - Airflow installation directory
+- `AIRFLOW__CORE__DAGS_FOLDER` - Airflow DAGs folder location
+
+See [.env.example](.env.example) for a complete template.
 
 ### Dependencies
 
@@ -121,7 +220,7 @@ anyio>=4.0.0              # Async I/O support
 
 ### Interactive Mode
 
-Run the main orchestrator with an interactive conversation loop:
+Run the main orchestrator with an interactive conversation loop using the Flask App `Hello World` example:
 
 ```bash
 python flask_agent.py
@@ -129,6 +228,22 @@ python flask_agent.py
 
 **Available Commands:**
 - `flask` - Trigger Flask app generation orchestration
+- `exit` - Quit the session
+- `interrupt` - Stop current task execution
+- `new` - Start a fresh conversation session
+
+### Airflow Mode
+
+Run the Airflow orchestrator for DAG creation and migration:
+
+```bash
+cd airflow
+python airflow_agent.py
+```
+
+**Available Commands:**
+- `create-dag` - Create a new Airflow DAG
+- `migrate-dag` - Migrate Airflow 1.0 DAG to 2.0
 - `exit` - Quit the session
 - `interrupt` - Stop current task execution
 - `new` - Start a fresh conversation session
@@ -246,20 +361,12 @@ The orchestration system generates a complete Flask application with:
 
 ## Configuration
 
-### Environment Variables
-```bash
-LOG_LEVEL=DEBUG              # Logging verbosity (DEBUG, INFO, ERROR)
-SET_DEBUG=false              # Enable debug message output
-FLASK_ENV=development        # Flask environment
-FLASK_PROJECT_PATH=/path/to/generated_code
-PYTHONPATH=/path/to/python
-```
+### Agent Configuration Options
 
-### Agent Configuration
 ```python
 ClaudeAgentOptions(
     setting_sources=["project"],
-    cwd="/home/dev/claude_swarm/generated_code",
+    cwd="{root_path}/claude_swarm/generated_code",
     agents={
         "flask-developer": AgentDefinition(...),
         "frontend-developer": AgentDefinition(...),
@@ -346,11 +453,32 @@ Turn 1: You: flask
 Turn 2: You: exit
 ```
 
-## Testing
+## Examples and Testing
 
-The repository includes test orchestrators for advanced scenarios:
+### Official SDK Examples
 
-### test_agent.py
+The `examples/` directory contains 12 example scripts from the official Claude Agent SDK that demonstrate various features:
+
+- **quick_start.py** - Basic agent setup and usage
+- **agents.py** - Multi-agent orchestration patterns
+- **streaming_mode.py** - Streaming responses with asyncio
+- **streaming_mode_trio.py** - Streaming with Trio async framework
+- **streaming_mode_ipython.py** - Interactive IPython streaming
+- **hooks.py** - Custom hooks for agent lifecycle events
+- **system_prompt.py** - Custom system prompt configuration
+- **setting_sources.py** - Configuration source management
+- **tool_permission_callback.py** - Tool permission handling
+- **stderr_callback_example.py** - Error handling callbacks
+- **include_partial_messages.py** - Partial message handling
+- **mcp_calculator.py** - Model Context Protocol example
+
+See [examples/README.md](examples/README.md) for links to the official documentation.
+
+### Development Test Orchestrators
+
+The `dev/` directory includes advanced test orchestrators:
+
+#### dev/test_dev.py
 Demonstrates 4-agent orchestration with:
 1. **code-generator**: Feature implementation
 2. **test-generator**: Test suite creation
@@ -364,7 +492,20 @@ Includes 5-phase workflow:
 4. Review Phase
 5. Verification Phase
 
+#### dev/client_query.py
+Alternative orchestrator that supports CLAUDE.md guidelines for custom project workflows.
+
+#### dev/flask_app_dev.py
+Development version of Flask orchestrator with additional debugging and testing features.
+
 ## Troubleshooting
+
+### Issue: "API key not found" or authentication errors
+**Solution**:
+1. Ensure you have created a `.env` file in the project root
+2. Copy from `.env.example`: `cp .env.example .env`
+3. Add your Anthropic API key to the `.env` file
+4. Verify the key is valid at https://console.anthropic.com/
 
 ### Issue: Agent doesn't have required tool access
 **Solution**: Check agent definition - ensure the agent has necessary tools (e.g., `code-reviewer` needs Read, Grep, Glob)
@@ -372,14 +513,24 @@ Includes 5-phase workflow:
 ### Issue: Agents working on conflicting files
 **Solution**: Delegate sequentially or assign different file responsibilities
 
-### Issue: Unclear which agent to use
+### Issue: Unclear which agent to use for Flask
 **Solution**:
 - Python/Flask/Backend → `@flask-developer`
 - HTML/CSS/Templates → `@frontend-developer`
 - Linting/Review/Quality → `@code-reviewer`
 
+### Issue: Unclear which agent to use for Airflow
+**Solution**:
+- DAG Architecture/Design → `@dag-architect`
+- DAG Implementation → `@dag-developer`
+- Airflow 1.0 to 2.0 Migration → `@migration-specialist`
+- Code Review/Best Practices → `@airflow-code-reviewer`
+
 ### Issue: Import errors or missing dependencies
 **Solution**: Reinstall requirements: `pip install -r requirements.txt`
+
+### Issue: Logging files not being created
+**Solution**: Check `LOG_LEVEL` environment variable and ensure the `logs/` directory exists
 
 ## Contributing
 

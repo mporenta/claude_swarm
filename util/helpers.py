@@ -19,7 +19,7 @@ from claude_agent_sdk import (
 )
 
 
-from log_set import logger, log_config
+from util.log_set import logger, log_config
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 print(f"[dim]Helper LOG_LEVEL: {LOG_LEVEL}[/dim]")
@@ -53,18 +53,18 @@ def display_message(msg, debug: str = LOG_LEVEL):
 
                 elif isinstance(block, ThinkingBlock):
                     console.print(
-                        f"[yellow]💭 [{timestamp}] Thinking:[/yellow] {block.thinking[:100]}..."
+                        f"[yellow]💭 [{timestamp}] Thinking:[/yellow] {block.thinking[:300]}..."
                     )
 
                 elif isinstance(block, ToolUseBlock):
                     console.print(
                         f"[magenta]⚙️  [{timestamp}] Tool Use:[/magenta] {block.name}"
                     )
-                    console.print(f"   Input: {str(block.input)[:100]}...")
+                    console.print(f"   Input: {str(block.input)[:300]}...")
 
                 elif isinstance(block, ToolResultBlock):
                     result_preview = (
-                        str(block.content)[:100] if block.content else "No content"
+                        str(block.content)[:300] if block.content else "No content"
                     )
                     console.print(
                         f"[blue]✅ [{timestamp}] Tool Result:[/blue] {result_preview}..."

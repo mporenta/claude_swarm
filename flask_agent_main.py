@@ -16,7 +16,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
     ThinkingBlock,
     ToolResultBlock,
-    query,
     UserMessage,
     SystemMessage,
 )

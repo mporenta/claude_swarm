@@ -1,4 +1,3 @@
-from typing import Any
 import time
 import asyncio
 from pathlib import Path
@@ -9,13 +8,10 @@ from claude_agent_sdk import (
     AgentDefinition,
     AssistantMessage,
     ResultMessage,
-    TextBlock,
     ToolUseBlock,
     ThinkingBlock,
-    ToolResultBlock,
     query,
-    UserMessage,
-    SystemMessage,
+
 )
 from util.helpers import load_markdown_for_prompt, display_message
 
@@ -81,7 +77,7 @@ class AirflowAgentSession:
         display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
 
         # Load the main orchestrator prompt
-        main_prompt = load_markdown_for_prompt("prompts/airflow-orchestrator.md")
+        main_prompt = load_markdown_for_prompt("prompts/airflow_prompts/airflow-orchestrator.md")
         
         # Get user requirements
         dag_name = input("DAG name (e.g., 'marketo_to_snowflake'): ")
@@ -174,7 +170,7 @@ Create complete, production-ready code.
         display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
 
         # Load the main orchestrator prompt
-        main_prompt = load_markdown_for_prompt("prompts/airflow-orchestrator.md")
+        main_prompt = load_markdown_for_prompt("prompts/airflow_prompts/airflow-orchestrator.md")
         
         # Get user requirements
         legacy_dag_path = input("Path to legacy DAG file: ")
@@ -276,10 +272,10 @@ if __name__ == "__main__":
     display_message(f"[dim]Airflow DAGs directory: {project_root}/airflow/data-airflow-2/dags[/dim]\n")
     
     # Load markdown prompt files for all subagents
-    dag_architect_prompt = load_markdown_for_prompt("prompts/dag-architect.md")
-    dag_developer_prompt = load_markdown_for_prompt("prompts/dag-developer.md")
-    migration_specialist_prompt = load_markdown_for_prompt("prompts/migration-specialist.md")
-    code_reviewer_prompt = load_markdown_for_prompt("prompts/airflow-code-reviewer.md")
+    dag_architect_prompt = load_markdown_for_prompt("prompts/airflow_prompts/dag-architect.md")
+    dag_developer_prompt = load_markdown_for_prompt("prompts/airflow_prompts/dag-developer.md")
+    migration_specialist_prompt = load_markdown_for_prompt("prompts/airflow_prompts/migration-specialist.md")
+    code_reviewer_prompt = load_markdown_for_prompt("prompts/airflow_prompts/airflow-code-reviewer.md")
     
     # Additional directory access for airflow DAGs
     airflow_2_dags_dir = project_root / "airflow" / "data-airflow-2" / "dags"

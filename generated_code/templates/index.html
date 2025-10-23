@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Dynamic Hello World Flask Application with Random Styling">
+  <title>Hello World - Dynamic Styling</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 100%;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Subtle animated background elements */
+    body::before {
+      content: '';
+      position: absolute;
+      width: 350px;
+      height: 350px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 50%;
+      top: -100px;
+      left: -100px;
+      animation: float 8s ease-in-out infinite;
+    }
+
+    body::after {
+      content: '';
+      position: absolute;
+      width: 450px;
+      height: 450px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 50%;
+      bottom: -150px;
+      right: -150px;
+      animation: float 10s ease-in-out infinite reverse;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translate(0, 0) scale(1);
+      }
+      50% {
+        transform: translate(30px, 30px) scale(1.1);
+      }
+    }
+
+    main {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 2rem;
+      width: 100%;
+      max-width: 800px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 4rem 3rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      position: relative;
+      animation: slideIn 0.6s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .hello-world {
+      font-weight: 700;
+      line-height: 1.2;
+      margin: 0;
+      padding: 1rem;
+      letter-spacing: 0.02em;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+      word-wrap: break-word;
+      /* Dynamic styling from Flask template variables */
+      color: {{ color }};
+      font-size: {{ font_size }};
+      font-family: {{ font_family }}, sans-serif;
+    }
+
+    .subtitle {
+      color: #555;
+      font-size: 1rem;
+      margin-top: 1.5rem;
+      font-weight: 400;
+      letter-spacing: 0.5px;
+      font-family: 'Georgia', serif;
+      font-style: italic;
+    }
+
+    .refresh-hint {
+      color: #888;
+      font-size: 0.875rem;
+      margin-top: 2rem;
+      font-style: italic;
+      opacity: 0.8;
+    }
+
+    /* Decorative corner elements */
+    .decoration {
+      position: absolute;
+      width: 50px;
+      height: 50px;
+      border: 2px solid rgba(102, 126, 234, 0.3);
+      border-radius: 10px;
+      transform: rotate(45deg);
+    }
+
+    .decoration.top-left {
+      top: -25px;
+      left: -25px;
+    }
+
+    .decoration.bottom-right {
+      bottom: -25px;
+      right: -25px;
+    }
+
+    /* Responsive design for tablets */
+    @media (max-width: 768px) {
+      .card {
+        padding: 3rem 2rem;
+        border-radius: 15px;
+      }
+
+      .hello-world {
+        max-width: 100%;
+        word-wrap: break-word;
+      }
+
+      .subtitle {
+        font-size: 0.9rem;
+      }
+
+      body::before,
+      body::after {
+        width: 250px;
+        height: 250px;
+      }
+    }
+
+    /* Responsive design for mobile */
+    @media (max-width: 480px) {
+      main {
+        padding: 1rem;
+      }
+
+      .card {
+        padding: 2rem 1.5rem;
+        border-radius: 15px;
+      }
+
+      .hello-world {
+        padding: 0.5rem;
+      }
+
+      .subtitle {
+        font-size: 0.85rem;
+        margin-top: 1rem;
+      }
+
+      .refresh-hint {
+        font-size: 0.75rem;
+        margin-top: 1.5rem;
+      }
+
+      .decoration {
+        width: 35px;
+        height: 35px;
+      }
+
+      .decoration.top-left {
+        top: -18px;
+        left: -18px;
+      }
+
+      .decoration.bottom-right {
+        bottom: -18px;
+        right: -18px;
+      }
+
+      body::before,
+      body::after {
+        width: 180px;
+        height: 180px;
+      }
+    }
+
+    /* Accessibility: Respect user's motion preferences */
+    @media (prefers-reduced-motion: reduce) {
+      .card,
+      body::before,
+      body::after {
+        animation: none;
+      }
+    }
+
+    /* Print styles */
+    @media print {
+      body {
+        background: white;
+      }
+
+      .card {
+        box-shadow: none;
+      }
+
+      .refresh-hint {
+        display: none;
+      }
+
+      .decoration {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article class="card">
+      <div class="decoration top-left"></div>
+      <h1 class="hello-world">Hello World</h1>
+      <p class="subtitle">A dynamically styled Flask application</p>
+      <p class="refresh-hint">Refresh the page to see different random styles</p>
+      <div class="decoration bottom-right"></div>
+    </article>
+  </main>
+</body>
+</html>

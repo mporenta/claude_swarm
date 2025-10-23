@@ -1,88 +1,90 @@
 """
-Flask application that displays Hello World with randomized styling.
+Flask application that displays 'Hello World' with random styling.
 
-This application serves a single homepage route that generates random
-styling attributes (color, font size, font family) on each page refresh.
+This application generates random text color, font size, and font family
+on each page refresh and passes these values to the template.
 """
 
 import random
-from typing import Dict, Any
+from typing import Tuple
 from flask import Flask, render_template
 
 app = Flask(__name__)
 
-# Configuration constants
-COLORS = ['red', 'blue', 'green', 'purple', 'orange', 'teal', 'magenta',
-          'gold']
-FONT_FAMILIES = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman',
-                 'Courier', 'Verdana']
-MIN_FONT_SIZE = 20
-MAX_FONT_SIZE = 100
 
-
-def generate_random_styles() -> Dict[str, Any]:
+def generate_random_styles() -> Tuple[str, int, str]:
     """
-    Generate random styling values for the page.
+    Generate random styling values for text display.
 
     Returns:
-        Dict[str, Any]: Dictionary containing random color, font_size,
-                        and font_family values.
+        Tuple[str, int, str]: A tuple containing:
+            - color (str): Random text color
+            - font_size (int): Random font size in pixels
+            - font_family (str): Random font family name
     """
-    return {
-        'color': random.choice(COLORS),
-        'font_size': f"{random.randint(MIN_FONT_SIZE, MAX_FONT_SIZE)}px",
-        'font_family': random.choice(FONT_FAMILIES)
-    }
+    colors = ['red', 'blue', 'green', 'purple', 'orange', 'teal',
+              'magenta', 'gold']
+    font_families = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman',
+                     'Courier', 'Verdana']
+
+    color = random.choice(colors)
+    font_size = random.randint(20, 100)
+    font_family = random.choice(font_families)
+
+    return color, font_size, font_family
 
 
 @app.route('/')
 def index() -> str:
     """
-    Render the homepage with randomized styling.
+    Render the homepage with randomly generated styling values.
 
     Returns:
-        str: Rendered HTML template with random style attributes.
+        str: Rendered HTML template with random styling applied
+
+    Raises:
+        Exception: Any rendering errors are caught and logged
     """
     try:
-        styles = generate_random_styles()
+        color, font_size, font_family = generate_random_styles()
         return render_template(
             'index.html',
-            color=styles['color'],
-            font_size=styles['font_size'],
-            font_family=styles['font_family']
+            color=color,
+            font_size=font_size,
+            font_family=font_family
         )
     except Exception as e:
-        app.logger.error(f"Error rendering template: {str(e)}")
+        app.logger.error(f"Error rendering template: {e}")
         return "An error occurred while loading the page.", 500
 
 
 @app.errorhandler(404)
-def not_found(error: Any) -> tuple:
+def page_not_found(e) -> Tuple[str, int]:
     """
     Handle 404 errors.
 
     Args:
-        error: The error object.
+        e: The error object
 
     Returns:
-        tuple: Error message and status code.
+        Tuple[str, int]: Error message and status code
     """
     return "Page not found.", 404
 
 
 @app.errorhandler(500)
-def internal_error(error: Any) -> tuple:
+def internal_server_error(e) -> Tuple[str, int]:
     """
     Handle 500 errors.
 
     Args:
-        error: The error object.
+        e: The error object
 
     Returns:
-        tuple: Error message and status code.
+        Tuple[str, int]: Error message and status code
     """
-    app.logger.error(f"Internal server error: {str(error)}")
-    return "An internal server error occurred.", 500
+    app.logger.error(f"Internal server error: {e}")
+    return "Internal server error.", 500
 
 
 if __name__ == '__main__':

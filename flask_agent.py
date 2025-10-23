@@ -27,6 +27,7 @@ class ConversationSession:
         self.client = ClaudeSDKClient(self.options)
         self.turn_count = 0
         self.project_dir = project_dir
+        self.client_agent = None
 
     async def start(self):
         await self.client.connect()
@@ -90,41 +91,44 @@ class ConversationSession:
         tool_use_count = 0
         thinking_count = 0
         files_created = []
+        async with self.client as self.client_agent:
+            await self.client_agent.query(prompt=main_prompt)
+            async for message in self.client_agent.receive_response():
 
-        async for message in self.client.query(prompt=main_prompt):
-            display_message(message)
+            #async for message in self.client.query(prompt=main_prompt):
+                display_message(message)
 
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, ThinkingBlock):
-                        thinking_count += 1
-                    elif isinstance(block, ToolUseBlock):
-                        tool_use_count += 1
-                        if block.name == "Write" and "file_path" in block.input:
-                            files_created.append(block.input["file_path"])
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, ThinkingBlock):
+                            thinking_count += 1
+                        elif isinstance(block, ToolUseBlock):
+                            tool_use_count += 1
+                            if block.name == "Write" and "file_path" in block.input:
+                                files_created.append(block.input["file_path"])
 
-            if isinstance(message, ResultMessage):
-                cost = float(message.total_cost_usd or 0)
-                display_message(f"\n[bold green]✅ Flask app creation complete![/bold green]")
-                display_message(f"[dim]📊 Summary:[/dim]")
-                display_message(f"   • Tool uses: {tool_use_count}")
-                display_message(f"   • Thinking blocks: {thinking_count}")
-                display_message(f"   • Files created: {len(files_created)}")
-                if cost > 0:
-                    display_message(f"   • Total cost: ${cost:.4f}")
+                if isinstance(message, ResultMessage):
+                    cost = float(message.total_cost_usd or 0)
+                    display_message(f"\n[bold green]✅ Flask app creation complete![/bold green]")
+                    display_message(f"[dim]📊 Summary:[/dim]")
+                    display_message(f"   • Tool uses: {tool_use_count}")
+                    display_message(f"   • Thinking blocks: {thinking_count}")
+                    display_message(f"   • Files created: {len(files_created)}")
+                    if cost > 0:
+                        display_message(f"   • Total cost: ${cost:.4f}")
 
-                display_message(f"\n[bold]📁 Project location:[/bold] {project_path.absolute()}")
-                display_message(f"[bold cyan]🚀 To run your Flask app:[/bold cyan]")
-                display_message(f"   cd {project_path.absolute()}")
-                display_message(f"   pip install -r requirements.txt")
-                display_message(f"   python app.py\n")
-                display_message(f"   Visit: [bold]http://localhost:5010[/bold]\n")
-                if files_created:
-                    display_message("[dim]Files created:[/dim]")
-                    for file in files_created:
-                        display_message(f"   • {file}")
-                end = time.perf_counter()
-                display_message(f"\n[bold]⏱️ Total time elapsed:  {end - start:.2f} seconds[/bold]\n")
+                    display_message(f"\n[bold]📁 Project location:[/bold] {project_path.absolute()}")
+                    display_message(f"[bold cyan]🚀 To run your Flask app:[/bold cyan]")
+                    display_message(f"   cd {project_path.absolute()}")
+                    display_message(f"   pip install -r requirements.txt")
+                    display_message(f"   python app.py\n")
+                    display_message(f"   Visit: [bold]http://localhost:5010[/bold]\n")
+                    if files_created:
+                        display_message("[dim]Files created:[/dim]")
+                        for file in files_created:
+                            display_message(f"   • {file}")
+                    end = time.perf_counter()
+                    display_message(f"\n[bold]⏱️ Total time elapsed:  {end - start:.2f} seconds[/bold]\n")
 
 
 if __name__ == "__main__":

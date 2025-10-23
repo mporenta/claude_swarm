@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Dynamic Hello World Flask Application with Random Styling">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <title>Hello World - Dynamic Styling</title>
   <style>
     * {
@@ -13,7 +13,6 @@
     }
 
     body {
-      width: 100%;
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -24,63 +23,66 @@
       position: relative;
     }
 
-    /* Subtle animated background elements */
-    body::before {
-      content: '';
-      position: absolute;
-      width: 350px;
-      height: 350px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 50%;
-      top: -100px;
-      left: -100px;
-      animation: float 8s ease-in-out infinite;
-    }
-
+    /* Animated background circles */
+    body::before,
     body::after {
       content: '';
       position: absolute;
-      width: 450px;
-      height: 450px;
-      background: rgba(255, 255, 255, 0.05);
       border-radius: 50%;
-      bottom: -150px;
-      right: -150px;
-      animation: float 10s ease-in-out infinite reverse;
+      opacity: 0.1;
+      animation: float 20s infinite ease-in-out;
+    }
+
+    body::before {
+      width: 400px;
+      height: 400px;
+      background: white;
+      top: -100px;
+      left: -100px;
+      animation-delay: 0s;
+    }
+
+    body::after {
+      width: 300px;
+      height: 300px;
+      background: white;
+      bottom: -80px;
+      right: -80px;
+      animation-delay: 5s;
     }
 
     @keyframes float {
       0%, 100% {
-        transform: translate(0, 0) scale(1);
+        transform: translateY(0) translateX(0);
+      }
+      25% {
+        transform: translateY(-30px) translateX(20px);
       }
       50% {
-        transform: translate(30px, 30px) scale(1.1);
+        transform: translateY(-50px) translateX(-20px);
+      }
+      75% {
+        transform: translateY(-20px) translateX(30px);
       }
     }
 
-    main {
+    .container {
       position: relative;
       z-index: 1;
       text-align: center;
-      padding: 2rem;
-      width: 100%;
-      max-width: 800px;
-    }
-
-    .card {
+      padding: 3rem;
       background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px);
       border-radius: 20px;
-      padding: 4rem 3rem;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      position: relative;
-      animation: slideIn 0.6s ease-out;
+      backdrop-filter: blur(10px);
+      max-width: 90%;
+      animation: fadeIn 0.8s ease-out;
     }
 
-    @keyframes slideIn {
+    @keyframes fadeIn {
       from {
         opacity: 0;
-        transform: translateY(30px);
+        transform: translateY(20px);
       }
       to {
         opacity: 1;
@@ -89,133 +91,98 @@
     }
 
     .hello-world {
-      font-weight: 700;
-      line-height: 1.2;
+      color: {{ color }};
+      font-size: {{ font_size }}px;
+      font-family: {{ font_family }}, sans-serif;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
       margin: 0;
       padding: 1rem;
-      letter-spacing: 0.02em;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
       word-wrap: break-word;
-      /* Dynamic styling from Flask template variables */
-      color: {{ color }};
-      font-size: {{ font_size }};
-      font-family: {{ font_family }}, sans-serif;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
     }
 
     .subtitle {
-      color: #555;
-      font-size: 1rem;
       margin-top: 1.5rem;
-      font-weight: 400;
-      letter-spacing: 0.5px;
-      font-family: 'Georgia', serif;
-      font-style: italic;
+      color: #666;
+      font-size: 1rem;
+      font-weight: 300;
+      letter-spacing: 1px;
     }
 
     .refresh-hint {
-      color: #888;
-      font-size: 0.875rem;
       margin-top: 2rem;
-      font-style: italic;
-      opacity: 0.8;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 25px;
+      font-size: 0.875rem;
+      display: inline-block;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
 
-    /* Decorative corner elements */
-    .decoration {
-      position: absolute;
-      width: 50px;
-      height: 50px;
-      border: 2px solid rgba(102, 126, 234, 0.3);
-      border-radius: 10px;
-      transform: rotate(45deg);
+    .refresh-hint:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
     }
 
-    .decoration.top-left {
-      top: -25px;
-      left: -25px;
-    }
-
-    .decoration.bottom-right {
-      bottom: -25px;
-      right: -25px;
-    }
-
-    /* Responsive design for tablets */
+    /* Responsive design */
     @media (max-width: 768px) {
-      .card {
-        padding: 3rem 2rem;
-        border-radius: 15px;
-      }
-
-      .hello-world {
-        max-width: 100%;
-        word-wrap: break-word;
-      }
-
-      .subtitle {
-        font-size: 0.9rem;
-      }
-
-      body::before,
-      body::after {
-        width: 250px;
-        height: 250px;
-      }
-    }
-
-    /* Responsive design for mobile */
-    @media (max-width: 480px) {
-      main {
-        padding: 1rem;
-      }
-
-      .card {
+      .container {
         padding: 2rem 1.5rem;
         border-radius: 15px;
       }
 
       .hello-world {
-        padding: 0.5rem;
+        font-size: calc({{ font_size }}px * 0.7);
       }
 
       .subtitle {
-        font-size: 0.85rem;
-        margin-top: 1rem;
+        font-size: 0.875rem;
       }
 
       .refresh-hint {
         font-size: 0.75rem;
-        margin-top: 1.5rem;
+        padding: 0.6rem 1.2rem;
       }
 
-      .decoration {
-        width: 35px;
-        height: 35px;
+      body::before {
+        width: 250px;
+        height: 250px;
       }
 
-      .decoration.top-left {
-        top: -18px;
-        left: -18px;
-      }
-
-      .decoration.bottom-right {
-        bottom: -18px;
-        right: -18px;
-      }
-
-      body::before,
       body::after {
-        width: 180px;
-        height: 180px;
+        width: 200px;
+        height: 200px;
       }
     }
 
-    /* Accessibility: Respect user's motion preferences */
-    @media (prefers-reduced-motion: reduce) {
-      .card,
-      body::before,
-      body::after {
-        animation: none;
+    @media (max-width: 480px) {
+      .container {
+        padding: 1.5rem 1rem;
+      }
+
+      .hello-world {
+        font-size: calc({{ font_size }}px * 0.5);
+      }
+
+      .subtitle {
+        font-size: 0.75rem;
+        margin-top: 1rem;
+      }
+
+      .refresh-hint {
+        margin-top: 1.5rem;
       }
     }
 
@@ -225,29 +192,27 @@
         background: white;
       }
 
-      .card {
+      .container {
         box-shadow: none;
+        background: white;
       }
 
       .refresh-hint {
         display: none;
       }
 
-      .decoration {
+      body::before,
+      body::after {
         display: none;
       }
     }
   </style>
 </head>
 <body>
-  <main>
-    <article class="card">
-      <div class="decoration top-left"></div>
-      <h1 class="hello-world">Hello World</h1>
-      <p class="subtitle">A dynamically styled Flask application</p>
-      <p class="refresh-hint">Refresh the page to see different random styles</p>
-      <div class="decoration bottom-right"></div>
-    </article>
+  <main class="container">
+    <h1 class="hello-world">Hello World</h1>
+    <p class="subtitle">Dynamic styling with every refresh</p>
+    <div class="refresh-hint">Refresh the page to see new styles!</div>
   </main>
 </body>
 </html>

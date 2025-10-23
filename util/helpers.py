@@ -1,3 +1,4 @@
+# helpers.py
 from pathlib import Path
 import re, os
 from datetime import datetime
@@ -19,15 +20,20 @@ from log_set import logger, log_config
 
 SET_DEBUG = os.getenv("SET_DEBUG", "False").lower() in ("true", "1", "yes")
 
-def display_message(msg, debug=SET_DEBUG):
+def display_message(msg, debug: bool=SET_DEBUG):
     """Claude SDK standardized message display function with status indicators."""
     try:
-        if debug:
-            log_config.setup()
-            logger.debug(f"Displaying message: {msg}")
-
+        debug=True
         timestamp = datetime.now().strftime("%H:%M:%S")
         console = Console()
+        debug_print= print(msg)
+        if debug:
+            log_config.setup()
+            logger.debug(f"message log: {msg}")
+            console.print(f"[dim]Debug: Displaying message at {timestamp}[/dim]")
+            console.print(msg)
+
+        
         
         if isinstance(msg, UserMessage):
             for block in msg.content:

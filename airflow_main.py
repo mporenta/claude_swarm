@@ -5,12 +5,12 @@ from rich import print
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
-    AgentDefinition,
     AssistantMessage,
     ResultMessage,
     ToolUseBlock,
     ThinkingBlock,
 )
+from util.config_loader import load_agent_options_from_yaml
 from util.helpers import load_markdown_for_prompt, display_message
 from util.log_set import log_config, logger
 
@@ -331,72 +331,19 @@ if __name__ == "__main__":
         f"[dim]Airflow DAGs directory: {project_root}/data-airflow/dags[/dim]\n"
     )
 
-    # Load markdown prompt files for all subagents
-    dag_architect_prompt = load_markdown_for_prompt(
-        "prompts/airflow_prompts/dag-architect.md"
-    )
-    dag_developer_prompt = load_markdown_for_prompt(
-        "prompts/airflow_prompts/dag-developer.md"
-    )
-    migration_specialist_prompt = load_markdown_for_prompt(
-        "prompts/airflow_prompts/migration-specialist.md"
-    )
-    code_reviewer_prompt = load_markdown_for_prompt(
-        "prompts/airflow_prompts/airflow-code-reviewer.md"
-    )
-
     # Additional directory access for airflow DAGs
     airflow_2_dags_dir = project_root / "data-airflow" / "dags"
     airflow_legacy_dags_dir = project_root / "data-airflow-legacy" / "dags"
 
-    options = ClaudeAgentOptions(
-        system_prompt="claude_code",
-        continue_conversation=True,
-        setting_sources=["project"],  # Look for .claude/settings.json at project root
-        cwd=str(output_dir),  # Set working directory to output location
-        add_dirs=[
-            str(airflow_2_dags_dir),  # Grant access to Airflow 2 DAGs
-            str(airflow_legacy_dags_dir),  # Grant access to legacy DAGs for migration
-        ],
-        env={
-            # Airflow configuration
-            "AIRFLOW_HOME": str(project_root / "airflow"),
-            "AIRFLOW__CORE__DAGS_FOLDER": str(airflow_2_dags_dir),
-            # Python configuration
-            "PYTHONPATH": "/home/dev/.pyenv/versions/3.13.5/bin/python3",
-            # Project configuration
-            "PROJECT_ROOT": str(project_root),
-            "OUTPUT_DIR": str(output_dir),
-        },
-        agents={
-            "dag-architect": AgentDefinition(
-                description="Expert Airflow architect for planning DAG structure and dependencies.",
-                prompt=dag_architect_prompt,
-                tools=["Read", "Grep", "Glob"],
-                model="sonnet",
-            ),
-            "dag-developer": AgentDefinition(
-                description="Expert Airflow 2 developer for writing production-ready DAG code.",
-                prompt=dag_developer_prompt,
-                tools=["Read", "Write", "Edit", "Bash", "Grep"],
-                model="sonnet",
-            ),
-            "migration-specialist": AgentDefinition(
-                description="Expert in migrating Airflow 1.0 DAGs to 2.0 with modernization.",
-                prompt=migration_specialist_prompt,
-                tools=["Read", "Write", "Edit", "Grep", "Glob"],
-                model="sonnet",
-            ),
-            "airflow-code-reviewer": AgentDefinition(
-                description="Code review specialist for Airflow best practices and CLAUDE.md compliance.",
-                prompt=code_reviewer_prompt,
-                tools=["Read", "Grep", "Glob"],
-                model="haiku",
-            ),
-        },
-        allowed_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
-        permission_mode="acceptEdits",
-    )
+    options_config_path = script_path.parent / "airflow_agent_options.yaml"
+    options_context = {
+        "project_root": project_root,
+        "output_dir": output_dir,
+        "airflow_2_dags_dir": airflow_2_dags_dir,
+        "airflow_legacy_dags_dir": airflow_legacy_dags_dir,
+    }
+
+    options = load_agent_options_from_yaml(options_config_path, options_context)
 
     session = AirflowAgentSession(options, project_dir=str(output_dir))
     asyncio.run(session.start())

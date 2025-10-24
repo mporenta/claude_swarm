@@ -1,0 +1,59 @@
+system_prompt: claude_code
+continue_conversation: true
+setting_sources:
+  - project
+cwd: "{output_dir}"
+add_dirs:
+  - "{airflow_2_dags_dir}"
+  - "{airflow_legacy_dags_dir}"
+env:
+  AIRFLOW_HOME: "{project_root}/airflow"
+  AIRFLOW__CORE__DAGS_FOLDER: "{airflow_2_dags_dir}"
+  PYTHONPATH: "/home/dev/.pyenv/versions/3.13.5/bin/python3"
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
+agents:
+  dag-architect:
+    description: "Expert Airflow architect for planning DAG structure and dependencies."
+    prompt_path: prompts/airflow_prompts/dag-architect.md
+    tools:
+      - Read
+      - Grep
+      - Glob
+    model: sonnet
+  dag-developer:
+    description: "Expert Airflow 2 developer for writing production-ready DAG code."
+    prompt_path: prompts/airflow_prompts/dag-developer.md
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Grep
+    model: sonnet
+  migration-specialist:
+    description: "Expert in migrating Airflow 1.0 DAGs to 2.0 with modernization."
+    prompt_path: prompts/airflow_prompts/migration-specialist.md
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Grep
+      - Glob
+    model: sonnet
+  airflow-code-reviewer:
+    description: "Code review specialist for Airflow best practices and CLAUDE.md compliance."
+    prompt_path: prompts/airflow_prompts/airflow-code-reviewer.md
+    tools:
+      - Read
+      - Grep
+      - Glob
+    model: haiku
+allowed_tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
+permission_mode: acceptEdits

@@ -1,0 +1,560 @@
+================================================================================
+INVOCA TO SNOWFLAKE - AIRFLOW 1.0 TO 2.0 MIGRATION ANALYSIS
+================================================================================
+
+ANALYSIS DATE: October 24, 2025
+LEGACY DAG: /home/dev/airflow/data-airflow-legacy/dags/invoca_to_snowflake.py
+DAG OWNER: zak.browning@goaptive.com
+MIGRATION COMPLEXITY: MEDIUM
+ESTIMATED EFFORT: 2-3 days (12-20 hours)
+RISK LEVEL: LOW
+
+================================================================================
+1. CURRENT DAG STRUCTURE SUMMARY
+================================================================================
+
+Schedule:
+  - Local:       schedule_interval = None
+  - Staging:     schedule_interval = "30 7-23 * * *" (hourly at :30 between 7am-11pm)
+  - Production:  schedule_interval = "0 7-23 * * *" (hourly on the hour 7am-11pm)
+
+Task Configuration:
+  - 3-task pipeline per endpoint: ensure_table_exists → fetch_to_s3 → copy_to_snowflake
+  - Currently 1 active endpoint: transactions
+  - Structure supports dynamic multi-endpoint configuration
+
+Data Flow:
+  - Invoca API (paginated via start_after_transaction_id)
+  - Upload to S3 (JSON format)
+  - COPY INTO Snowflake raw table (append-only)
+
+Key Parameters:
+  - Owner: zak.browning@goaptive.com
+  - Start Date: 2024-02-01
+  - Retries: 1 with 3-minute delay
+  - Concurrency: 3 tasks / Max Active Runs: 1
+  - Catchup: False
+
+================================================================================
+2. CRITICAL MIGRATION ISSUES
+================================================================================
+
+2.1 IMPORT STATEMENTS - ALL NEED UPDATING
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Legacy Import                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ from airflow.operators.python_operator import PythonOperator                │
+│ → REPLACE WITH: from airflow.operators.python import PythonOperator         │
+│                                                                             │
+│ from plugins.operators.snowflake_execute_query import                       │
+│ SnowflakeExecuteQueryOperator                                               │
+│ → REPLACE WITH: from airflow.providers.snowflake.operators.snowflake import │
+│   SnowflakeOperator                                                         │
+│                                                                             │
+│ from plugins.operators.on_failure_callback import on_failure_callback       │
+│ from plugins.operators.on_success_callback import on_success_callback       │
+│ → REPLACE WITH: from common.custom_callbacks.custom_callbacks import        │
+│   AirflowCallback                                                           │
+│                                                                             │
+│ from plugins.hooks.s3_upload_hook import S3UploadHook                       │
+│ → REPLACE WITH: from common.custom_hooks.custom_s3_hook import CustomS3Hook │
+│                                                                             │
+│ from plugins.hooks.snowflake_custom import (SnowflakeCheckTableExists,      │
+│ SnowflakeCreateTable)                                                       │
+│ → REPLACE WITH: from common.custom_hooks.custom_snowflake_hook import       │
+│   CustomSnowflakeHook                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+2.2 FUNCTION ORGANIZATION - VIOLATES SINGLE RESPONSIBILITY
+─────────────────────────────────────────────────────────────
+
+Current Structure Problems:
+  ✗ DAG definition mixed with API code mixed with data processing
+  ✗ get_conn() - API setup, minimal change needed
+  ✗ fetch_transactions() - Large paginated fetch function
+  ✗ fetch_data() - Dispatcher function (unnecessary complexity)
+  ✗ load_to_s3() - Combines data fetching + processing + S3 upload
+  ✗ ensure_table_exists() - Wrapper around legacy hooks
+
+Required Refactoring:
+  ✓ Extract to src/invoca_api.py:
+    - get_conn(endpoint: str) → Tuple[str, Dict[str, str]]
+    - fetch_transactions(...) → List[Dict[str, Any]]
+    - fetch_data(...) → Optional[List[Dict[str, Any]]]
+
+  ✓ Extract to src/invoca_processor.py:
+    - ensure_table_exists(schema: str, table: str, **kwargs)
+    - load_to_s3(task_name: str, ...)
+
+  ✓ Create src/main.py:
+    - Main class with configuration
+    - Task definitions/execute() method
+
+2.3 HEARTBEAT SAFETY - GOOD ✓
+──────────────────────────────
+
+Analysis Results:
+  ✓ No class instantiation at DAG level
+  ✓ Only Variable.get('env') at DAG level (acceptable)
+  ✓ No API calls or DB operations at DAG level
+  ✓ All heavy operations isolated in task functions
+
+Verdict: DAG is HEARTBEAT-SAFE. No changes needed for heartbeat issues.
+
+2.4 VARIABLES VS CONNECTIONS - GOOD ✓
+────────────────────────────────────
+
+Variables (Current Usage):
+  ✓ env - Environment selector (APPROPRIATE - needed for DAG logic)
+  ✓ invoca_transactions_last_id - Pagination checkpoint (ACCEPTABLE)
+  ✓ etl-tmp-bucket - S3 bucket name (APPROPRIATE)
+
+Connections (Current Usage):
+  ✓ invoca - API connection with auth_token in extras (CORRECT)
+  ✓ snowflake_default - Snowflake connection (STANDARD)
+  ✓ aws_default - AWS connection (STANDARD)
+
+Phase 2 Enhancement (Optional):
+  - Consider migrating pagination checkpoint from Variable to Snowflake
+    metadata table for better versioning control
+
+Verdict: ALREADY FOLLOWING BEST PRACTICES. No changes required.
+
+2.5 ERROR HANDLING - CRITICAL ISSUES FOUND
+───────────────────────────────────────
+
+Problem 1: Rate Limit Infinite Retries
+  Current Code:
+    if response.status_code == 429:
+        time.sleep(30)
+        # Retries indefinitely without ceiling
+
+  Issue: Potential for infinite retry loop if API consistently rate limits
+
+  Fix Required:
+    max_retries = 3
+    retry_count = 0
+    if response.status_code == 429:
+        if retry_count < max_retries:
+            retry_after = int(response.headers.get("Retry-After", 60))
+            time.sleep(retry_after)
+            retry_count += 1
+        else:
+            raise Exception("Max retries exceeded after rate limiting")
+
+Problem 2: Silent Failures on Unknown Tasks
+  Current Code:
+    if task_name == 'transactions':
+        transactions = fetch_transactions(...)
+    else:
+        logger.error(f"Task {task_name} not found.")
+        return None  # Silent return
+
+  Issue: No exception raised; task continues with None data
+
+  Fix Required:
+    raise ValueError(f"Unknown task: {task_name}")
+
+Problem 3: No Response Validation
+  Current: Doesn't validate API response structure
+  Fix: Add schema validation before processing
+
+2.6 TYPE HINTS - MISSING THROUGHOUT
+───────────────────────────────────
+
+All functions lack type annotations:
+  Current: def fetch_transactions(base_url, headers, base_params, task_name):
+  Required: def fetch_transactions(base_url: str, headers: Dict[str, str],
+               base_params: Dict[str, Any], task_name: str)
+             -> List[Dict[str, Any]]:
+
+Functions Needing Type Hints:
+  - get_conn(endpoint: str) → Tuple[str, Dict[str, str]]
+  - fetch_transactions(...) → List[Dict[str, Any]]
+  - fetch_data(...) → Optional[List[Dict[str, Any]]]
+  - load_to_s3(...) → Optional[str]
+  - ensure_table_exists(schema: str, table: str, **kwargs) → None
+
+================================================================================
+3. HOOK & OPERATOR REUSE ANALYSIS
+================================================================================
+
+Should We Create New Hooks?
+────────────────────────────
+
+Question: Does equivalent functionality exist in common/ directory?
+Answer: YES - All hooks exist and are production-ready ✓
+
+Hook Mapping:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ LEGACY HOOK                    │ MODERN EQUIVALENT              │
+  ├─────────────────────────────────────────────────────────────────┤
+  │ S3UploadHook                   │ CustomS3Hook                   │
+  │ Status: EXISTS ✓                                                │
+  │ Location: /dags/common/custom_hooks/custom_s3_hook.py           │
+  │                                                                 │
+  │ SnowflakeCheckTableExists      │ CustomSnowflakeHook.            │
+  │                                │ check_table_exists()            │
+  │ Status: EXISTS ✓                                                │
+  │ Location: /dags/common/custom_hooks/custom_snowflake_hook.py    │
+  │                                                                 │
+  │ SnowflakeCreateTable           │ CustomSnowflakeHook.            │
+  │                                │ ensure_table_exists()           │
+  │ Status: EXISTS ✓                                                │
+  │                                                                 │
+  │ SnowflakeExecuteQueryOperator  │ SnowflakeOperator (native AF2) │
+  │ Status: EXISTS ✓                                                │
+  │ Provider: airflow.providers.snowflake                           │
+  │                                                                 │
+  │ on_failure_callback            │ AirflowCallback.                │
+  │ on_success_callback            │ on_failure/success_callback()   │
+  │ Status: EXISTS ✓                                                │
+  │ Location: /dags/common/custom_callbacks/custom_callbacks.py     │
+  └─────────────────────────────────────────────────────────────────┘
+
+Invoca API-Specific Code:
+  get_conn(), fetch_transactions() functions
+  → NOT reusable across DAGs (Invoca-specific API logic)
+  → Keep in src/invoca_api.py
+
+Recommendation: USE EXISTING HOOKS - NO NEW HOOKS NEEDED ✓
+
+================================================================================
+4. DATA ARCHITECTURE DECISION
+================================================================================
+
+External Tables vs Raw Tables Decision
+──────────────────────────────────────
+
+Current Implementation: Raw table with COPY INTO
+
+Data Characteristics:
+  - Unique Key: transaction_id (used for pagination)
+  - Timestamp: System-generated (pipe_loaded_at)
+  - Processing Pattern: Append-only incremental sync
+  - Merge Logic: Not required
+  - Deduplication: Pagination handles it
+
+RECOMMENDATION: KEEP RAW TABLE APPROACH ✓
+
+Rationale:
+  ✓ Data already uploaded to S3 (no additional I/O)
+  ✓ Append-only pattern eliminates merge complexity
+  ✓ COPY INTO is performant for streaming loads
+  ✓ External tables add S3 dependency without tangible benefit
+  ✓ No complex deduplication logic required
+
+Phase 2 Enhancement Option:
+  Could evaluate external tables if DBT modeling requirements change
+
+Current Snowflake Configuration:
+  - Stage: @STAGE.S3_STRATEGY_DATA_LAKE/invoca/transactions
+  - File Format: JSON
+  - Table Columns:
+    * raw_json (VARIANT)
+    * s3_path (VARCHAR) - metadata$filename
+    * s3_row_number (NUMBER) - metadata$file_row_number
+    * pipe_loaded_at (TIMESTAMP_TZ) - CURRENT_TIMESTAMP
+
+================================================================================
+5. MIGRATION IMPLEMENTATION STRATEGY
+================================================================================
+
+Target File Structure
+─────────────────────
+
+/home/dev/airflow/data-airflow/dags/invoca_to_snowflake/
+├── src/
+│   ├── __init__.py
+│   ├── main.py              # Configuration & execution methods
+│   ├── invoca_api.py        # API interaction functions
+│   └── invoca_processor.py  # S3 upload & table management functions
+├── hourly.py                # DAG definition (primary schedule)
+├── daily.py                 # DAG definition (secondary, if needed)
+└── README.md                # Documentation (create after production deploy)
+
+Task Structure (Keep 3-Task Pattern)
+────────────────────────────────────
+
+Per Active Endpoint:
+
+  1. ensure_{task_name}_table (PythonOperator)
+     - Callable: ensure_table_exists()
+     - Uses: CustomSnowflakeHook.ensure_table_exists()
+
+  2. {task_name}_to_s3 (PythonOperator)
+     - Callable: fetch_and_upload_to_s3()
+     - Uses: Invoca API + CustomS3Hook
+
+  3. {task_name}_to_snowflake (SnowflakeOperator)
+     - Query: COPY INTO invoca.transactions FROM @STAGE...
+     - Uses: SnowflakeOperator (native Airflow 2)
+
+Task Dependencies: ensure >> fetch >> copy
+
+TaskGroup Opportunity (Future):
+  Not needed now (only 1 active endpoint), but structure supports:
+    with TaskGroup("fetch_and_load_group"):
+        for endpoint in active_endpoints:
+            # Create task group per endpoint
+
+Configuration Keep-As-Is
+─────────────────────────
+
+tasks = [
+    {
+        'active': 1,
+        'task_name': 'transactions',
+        'endpoint': '2020-10-01/advertisers/transactions',
+        'params': {...},
+        'schema_name': 'invoca',
+        'table_name': 'transactions'
+    }
+]
+
+Move to: src/config.py or src/main.py
+
+Environment-Specific Overrides (Handled by Hooks):
+  - Snowflake Database:
+    * Staging: RAW_STAGING (handled by CustomSnowflakeHook via 'env' Variable)
+    * Production: RAW (handled by CustomSnowflakeHook via 'env' Variable)
+
+  - API Connection: 'invoca' (same across all environments)
+
+================================================================================
+6. IMPLEMENTATION CHECKLIST - PHASE 1
+================================================================================
+
+Pre-Migration Setup:
+  [ ] Create directory structure: dags/invoca_to_snowflake/src/
+  [ ] Verify modern hooks are accessible in common/ directory
+
+Code Migration:
+  [ ] Extract get_conn() to src/invoca_api.py with type hints
+  [ ] Extract fetch_transactions() to src/invoca_api.py
+      - Add max_retries=3 for rate limiting
+      - Add response validation
+      - Add comprehensive docstring
+  [ ] Extract fetch_data() to src/invoca_api.py as dispatcher
+  [ ] Extract ensure_table_exists() to src/invoca_processor.py
+      - Use CustomSnowflakeHook.ensure_table_exists()
+  [ ] Extract load_to_s3() to src/invoca_processor.py
+      - Use CustomS3Hook for uploads
+      - Split into separate focused functions
+  [ ] Create src/main.py with configuration
+  [ ] Create hourly.py DAG file with updated imports
+  [ ] Update ALL imports to Airflow 2.0 providers
+  [ ] Replace ALL legacy hooks with modern versions
+  [ ] Replace callback functions with AirflowCallback class
+
+Code Quality:
+  [ ] Add type hints to all functions
+  [ ] Add docstrings to all functions/methods
+  [ ] Improve error handling (add max_retries ceiling)
+  [ ] Add explicit exception raising for error cases
+  [ ] Run flake8 validation
+  [ ] Verify no stray plugins/ imports remain
+
+Testing:
+  [ ] Local testing with env=local (schedule_interval=None)
+  [ ] Test with sample Invoca data
+  [ ] Verify S3 upload functionality
+  [ ] Verify Snowflake COPY functionality
+  [ ] Data consistency check vs Legacy DAG
+  [ ] Compare row counts
+  [ ] Verify no duplicate records
+  [ ] Staging deployment
+  [ ] Run 3+ hourly cycles in staging
+  [ ] Monitor execution times
+  [ ] Verify pagination tracking (last_id variable)
+  [ ] Performance benchmarking vs Legacy DAG
+
+Phase 1 Success Criteria:
+  ✓ All imports updated to Airflow 2.0 providers
+  ✓ All legacy hooks replaced with modern versions
+  ✓ All functions have type hints
+  ✓ All functions have docstrings
+  ✓ Error handling includes max_retries ceiling
+  ✓ Data consistency validated against Legacy DAG
+  ✓ Staging tests pass (3+ cycles minimum)
+  ✓ Performance acceptable (≤ Legacy execution time)
+  ✓ Owner approval for production deployment
+
+================================================================================
+7. PHASE 2 ENHANCEMENTS (POST-PRODUCTION)
+================================================================================
+
+Optional improvements after production deployment:
+  [ ] Migrate pagination checkpoint from Variable to Snowflake metadata table
+  [ ] Add monitoring/alerting for API rate limiting issues
+  [ ] Consider async API calls if hourly schedule becomes bottleneck
+  [ ] Create SOP documentation in GitHub wiki
+  [ ] Update DAG doc_md with SOP reference
+
+================================================================================
+8. TESTING STRATEGY
+================================================================================
+
+Local Environment Testing
+──────────────────────────
+
+1. Run with env=local (schedule_interval=None)
+2. Test with sample Invoca data
+3. Verify S3 upload works:
+   - Check file appears in s3://etl-tmp-bucket/invoca/transactions/
+   - Verify JSON format
+4. Verify Snowflake COPY works:
+   - Check invoca.transactions table has rows
+   - Verify row counts match uploaded data
+5. Test error scenarios:
+   - Simulate API 429 rate limit (verify backoff)
+   - Simulate unknown task name (verify exception)
+   - Simulate API connection failure (verify error handling)
+
+Data Consistency Validation
+────────────────────────────
+
+1. Run both Legacy and Airflow 2 DAGs for same time period
+2. Compare row counts:
+   - SELECT COUNT(*) FROM invoca.transactions WHERE DATE(pipe_loaded_at) = 'DATE'
+3. Verify no duplicate records:
+   - SELECT transaction_id, COUNT(*) FROM invoca.transactions
+     GROUP BY transaction_id HAVING COUNT(*) > 1
+4. Spot-check data values:
+   - Compare sample transaction records between runs
+
+Staging Environment Testing
+────────────────────────────
+
+1. Deploy new DAG to staging environment
+2. Run minimum 3 hourly cycles:
+   - Allow scheduler to trigger at natural intervals
+   - Monitor execution logs
+   - Check Snowflake audit_events table
+3. Monitor metrics:
+   - Task execution times (compare to Legacy)
+   - S3 upload performance
+   - Snowflake COPY performance
+   - API rate limiting behavior
+4. Verify pagination:
+   - Check invoca_transactions_last_id variable updates
+   - Verify no data gaps
+   - Confirm incremental fetch continues correctly
+
+Performance Benchmarking
+─────────────────────────
+
+Compare metrics between Legacy and Airflow 2:
+  - Total DAG execution time
+  - Individual task times
+  - S3 upload speed (records/sec)
+  - Snowflake COPY speed (records/sec)
+  - API call count and timing
+  - Resource usage (memory, CPU)
+
+Acceptable Variance:
+  - +/- 10% execution time variance acceptable
+  - Performance improvements preferred but not required
+  - Reliability improvements justify minor slowdown
+
+================================================================================
+9. CRITICAL RISK MITIGATION
+================================================================================
+
+Risk #1: Infinite Rate Limit Retry Loop
+────────────────────────────────────────
+Severity: MEDIUM
+Symptom: Task hangs indefinitely when API rate limits
+Mitigation: Add max_retries=3 ceiling to rate limit backoff
+Status: REQUIRED FIX - Must implement before production
+
+Risk #2: Pagination State Loss
+───────────────────────────────
+Severity: LOW
+Symptom: If invoca_transactions_last_id variable is reset/deleted, DAG reprocesses old data
+Mitigation: Keep Variable approach (Phase 2 upgrade to Snowflake metadata table)
+Status: LOW PRIORITY - Current approach acceptable
+
+Risk #3: Silent Failures in API Calls
+──────────────────────────────────────
+Severity: MEDIUM
+Symptom: Unknown task names return None silently instead of raising exception
+Mitigation: Add explicit exception raising for error cases
+Status: REQUIRED FIX - Must implement before production
+
+Risk #4: Type Hint Incompleteness
+──────────────────────────────────
+Severity: LOW
+Symptom: Reduced code quality, harder IDE support
+Mitigation: Add type hints to all functions
+Status: QUALITY IMPROVEMENT - Required for code standards
+
+Risk #5: Legacy Hook Compatibility
+───────────────────────────────────
+Severity: HIGH
+Symptom: Stray plugins/ imports cause runtime failures
+Mitigation: Replace ALL imports before deployment
+Status: CRITICAL - Must verify zero legacy imports remain
+
+Risk #6: Data Duplication
+──────────────────────────
+Severity: MEDIUM
+Symptom: Same transactions loaded twice if not careful with pagination
+Mitigation: Test pagination logic extensively, compare with Legacy
+Status: TESTING REQUIREMENT - Must validate before production
+
+================================================================================
+10. OWNER CONTACT & COORDINATION
+================================================================================
+
+DAG Owner: zak.browning@goaptive.com
+
+Coordination Points:
+  ✓ After local testing completes (ready to move to staging)
+  ✓ If any data discrepancies found during validation
+  ✓ Before production deployment approval
+  ✓ To confirm acceptable execution times/performance
+  ✓ For pagination state strategy discussions (Phase 2)
+
+================================================================================
+11. SUMMARY & NEXT STEPS
+================================================================================
+
+Migration Complexity: MEDIUM
+  - Clear data flow, well-structured current code
+  - Limited custom hooks/operators
+  - No complex dependencies
+
+Estimated Effort: 2-3 days (12-20 hours)
+  - Day 1: Code refactoring and import updates (4-6 hours)
+  - Day 1-2: Testing and validation (4-6 hours)
+  - Day 2-3: Staging deployment and monitoring (4-8 hours)
+
+Risk Level: LOW
+  - Simple append-only data pattern
+  - No data loss risk (both DAGs can run simultaneously)
+  - Incremental state tracking minimizes corruption risk
+
+Go-No-Go Decision Points:
+  ✓ Data consistency validated against Legacy DAG
+  ✓ Staging tests pass (minimum 3 cycles)
+  ✓ Performance benchmarks acceptable
+  ✓ Owner approval for production deployment
+
+Files Created:
+  1. /home/dev/claude_swarm/generated_dags/INVOCA_MIGRATION_ANALYSIS.md (comprehensive)
+  2. /home/dev/claude_swarm/generated_dags/INVOCA_MIGRATION_SUMMARY.md (executive summary)
+  3. /home/dev/claude_swarm/generated_dags/INVOCA_QUICK_START.md (5-minute overview)
+  4. /home/dev/claude_swarm/generated_dags/INVOCA_FINDINGS.txt (this file)
+
+Next Actions:
+  1. Review findings with DAG owner (zak.browning@goaptive.com)
+  2. Schedule migration work
+  3. Create new directory structure
+  4. Begin Phase 1 implementation
+  5. Execute testing strategy
+  6. Move to staging when Phase 1 complete
+
+================================================================================
+END OF ANALYSIS
+================================================================================

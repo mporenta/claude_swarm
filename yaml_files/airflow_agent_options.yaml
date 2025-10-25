@@ -1,55 +1,55 @@
 system_prompt:
   type: preset
   preset: claude_code
-  append: ${orchestrator_agent}
-model: ${CLAUDE_MODEL}
+  append: "{orchestrator_agent}"
+model: "{CLAUDE_MODEL}"
 main_prompt_file: prompts/airflow_prompts/main-query-airflow.md
 setting_sources:
-   project
-cwd: ${output_dir}
+  - project
+cwd: "{output_dir}"
 add_dirs:
-   ${airflow_2_dags_dir}
-   ${airflow_legacy_dags_dir}
+  - "{airflow_2_dags_dir}"
+  - "{airflow_legacy_dags_dir}"
 env:
-  AIRFLOW_HOME: ${project_root}
-  AIRFLOW__CORE__DAGS_FOLDER: ${airflow_2_dags_dir}
+  AIRFLOW_HOME: "{project_root}"
+  AIRFLOW__CORE__DAGS_FOLDER: "{airflow_2_dags_dir}"
   PYTHONPATH: /opt/airflow/dags
-  PROJECT_ROOT: ${project_root}
-  OUTPUT_DIR: ${output_dir}
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
 agents:
   dag-developer:
     description: "Expert Airflow 2 developer for writing production-ready DAG code."
     prompt: prompts/airflow_prompts/dag-developer.md
     tools:
-       Read
-       Write
-       Edit
-       Bash
-       Grep
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Grep
     model: haiku
   migration-specialist:
     description: "Expert in migrating Airflow 1.0 DAGs to 2.0 with modernization."
     prompt: prompts/airflow_prompts/migration-specialist.md
     tools:
-       Read
-       Write
-       Edit
-       Grep
-       Glob
+      - Read
+      - Write
+      - Edit
+      - Grep
+      - Glob
     model: haiku
   airflow-code-reviewer:
     description: "Code review specialist for Airflow best practices and CLAUDE.md compliance."
     prompt: prompts/airflow_prompts/airflow-code-reviewer.md
     tools:
-       Read
-       Grep
-       Glob
+      - Read
+      - Grep
+      - Glob
     model: haiku
 allowed_tools:
-   Read
-   Write
-   Edit
-   Bash
-   Grep
-   Glob
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
 permission_mode: acceptEdits

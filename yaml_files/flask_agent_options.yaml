@@ -1,52 +1,52 @@
 system_prompt:
   type: preset
   preset: claude_code
-  append: ${orchestrator_agent}
-model: ${CLAUDE_MODEL}
+  append: "{orchestrator_agent}"
+model: "{CLAUDE_MODEL}"
 main_prompt_file: prompts/main-query.md
 setting_sources:
-   project
-cwd: ${output_dir}
+  - project
+cwd: "{output_dir}"
 add_dirs:
-   ${project_root}
+  - "{project_root}"
 env:
   FLASK_ENV: development
-  FLASK_PROJECT_PATH: ${output_dir}
+  FLASK_PROJECT_PATH: "{output_dir}"
   PYTHONPATH: /home/dev/.pyenv/versions/3.13.5/lib/python3.13/site-packages
-  PROJECT_ROOT: ${project_root}
-  OUTPUT_DIR: ${output_dir}
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
 agents:
   flask-developer:
     description: "Expert Flask developer for backend development."
     prompt: prompts/flask-developer.md
     tools:
-       Read
-       Write
-       Edit
-       Bash
+      - Read
+      - Write
+      - Edit
+      - Bash
     model: haiku
   frontend-developer:
     description: "Expert frontend developer for HTML/CSS/JavaScript."
     prompt: prompts/frontend-developer.md
     tools:
-       Read
-       Write
-       Edit
+      - Read
+      - Write
+      - Edit
     model: haiku
   code-reviewer:
     description: "Code review specialist for Flask best practices and quality."
     prompt: prompts/code-reviewer.md
     tools:
-       Read
-       Grep
-       Glob
-       Bash
+      - Read
+      - Grep
+      - Glob
+      - Bash
     model: haiku
 allowed_tools:
-   Read
-   Write
-   Edit
-   Bash
-   Grep
-   Glob
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
 permission_mode: acceptEdits

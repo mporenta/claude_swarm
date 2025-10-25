@@ -13,7 +13,12 @@ print(f"Log level set to: {env_log_level}")
 class LogConfig:
     """Centralized logging configuration for the application"""
 
-    def __init__(self, root_dir: str = None, timezone: str = None, log_level: str = "DEBUG"):
+    def __init__(
+        self,
+        root_dir: str = None,
+        timezone: str = None,
+        log_level: str = "DEBUG"
+    ):
         self._configured: bool = False
         self.root_dir = root_dir or str(Path(__file__).parent.parent)
         self.logs_dir = os.path.join(self.root_dir, "logs")
@@ -86,12 +91,14 @@ class LogConfig:
             )
             msg = f"\n{formatted_dict}"
         elif isinstance(msg, (list, tuple)):
-            formatted_list = "\n".join(f"    - {format_value(item)}" for item in msg)
+            formatted_list = "\n".join(
+                f"    - {format_value(item)}" for item in msg
+            )
             msg = f"\n{formatted_list}"
 
         return msg
 
-    def setup(self, log_level = "DEBUG"):
+    def setup(self, log_level="DEBUG"):
         """Set up logging configuration"""
         if log_level != "DEBUG":
             self.log_level = log_level
@@ -106,11 +113,13 @@ class LogConfig:
         # Derive today's date in specified timezone
         today_str = self._today_str()
 
-        # Clean up any date-stamped log files older than today (run before adding new handlers)
+        # Clean up any date-stamped log files older than today
+        # (run before adding new handlers)
         try:
             self._cleanup_old_dated_logs(today_str)
             print(
-                f"[LogConfig] Old dated logs cleaned up before setting up new logs for {today_str}"
+                f"[LogConfig] Old dated logs cleaned up before "
+                f"setting up new logs for {today_str}"
             )
         except (
             Exception
@@ -168,7 +177,8 @@ class LogConfig:
             )
         self._configured = True
         logger.debug(
-            f"Logging configured with dated files: {app_log_path}, {error_log_path}, {debug_log_path}"
+            f"Logging configured with dated files: {app_log_path}, "
+            f"{error_log_path}, {debug_log_path}"
         )
 
     def _today_str(self) -> str:
@@ -193,9 +203,10 @@ class LogConfig:
             return None
 
     def _cleanup_old_dated_logs(self, today_str: str):
-        """Delete any log files in logs_dir whose leading date (YYYY_MM_DD_) is older than today.
+        """Delete log files whose leading date (YYYY_MM_DD_) is older than today.
 
-        We only act on files that match our naming scheme to avoid deleting unrelated artifacts.
+        We only act on files that match our naming scheme to avoid deleting
+        unrelated artifacts.
         """
         today_parts = today_str.split("_")
         today_dt = date(int(today_parts[0]), int(today_parts[1]), int(today_parts[2]))

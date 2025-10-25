@@ -1,0 +1,102 @@
+# Airflow Agent Options - Local/Flexible Configuration
+#
+# This version uses environment variables for paths that differ across machines.
+# It works with local development, AWS Bedrock, and different team member setups.
+#
+# SETUP:
+# 1. Copy .env.airflow.example to .env.airflow
+# 2. Update paths in .env.airflow to match your local setup
+# 3. Source the environment: set -a; source .env.airflow; set +a
+# 4. Run: python main.py --config yaml_files/airflow_agent_options.local.yaml
+
+system_prompt:
+  type: preset
+  preset: claude_code
+  append: "{orchestrator_agent}"
+
+# Model to use - can be overridden by CLAUDE_MODEL env var
+model: "{CLAUDE_MODEL}"
+
+# Main prompt file for Airflow migration tasks
+# This file should be in the claude_swarm repo (stable location)
+main_prompt_file: prompts/airflow_prompts/main-query-airflow.md
+
+# Load project-level CLAUDE.md files if present
+setting_sources:
+  - project
+
+# Working directory for generated code/output
+# Defaults to generated_code/ in claude_swarm repo
+cwd: "{output_dir}"
+
+# Add Airflow project directories to SDK's search path
+# These are the critical paths that differ per environment
+add_dirs:
+  - "{AIRFLOW_2_DAGS_DIR}"          # Airflow 2.0 DAGs directory
+  - "{AIRFLOW_LEGACY_DAGS_DIR}"     # Airflow 1.0 Legacy DAGs directory
+
+# Environment variables passed to agents
+env:
+  # Airflow configuration
+  AIRFLOW_HOME: "{AIRFLOW_HOME}"
+  AIRFLOW__CORE__DAGS_FOLDER: "{AIRFLOW_2_DAGS_DIR}"
+
+  # Python environment
+  PYTHONPATH: "{PYTHONPATH}"
+
+  # Project paths for reference in agent prompts
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
+
+  # Airflow-specific paths
+  AIRFLOW_2_DAGS_DIR: "{AIRFLOW_2_DAGS_DIR}"
+  AIRFLOW_LEGACY_DAGS_DIR: "{AIRFLOW_LEGACY_DAGS_DIR}"
+  AIRFLOW_2_ROOT: "{AIRFLOW_2_ROOT}"
+  AIRFLOW_LEGACY_ROOT: "{AIRFLOW_LEGACY_ROOT}"
+
+# Specialized Airflow agents
+agents:
+  dag-developer:
+    description: "Expert Airflow 2 developer for writing production-ready DAG code with type hints and best practices."
+    prompt: prompts/airflow_prompts/dag-developer.md
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Bash
+      - Grep
+      - Glob
+    model: haiku
+
+  migration-specialist:
+    description: "Expert in migrating Airflow 1.0 DAGs to 2.0 with code modernization, breaking monolithic functions, and implementing clean code principles."
+    prompt: prompts/airflow_prompts/migration-specialist.md
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Grep
+      - Glob
+    model: haiku
+
+  airflow-code-reviewer:
+    description: "Code review specialist for Airflow best practices, CLAUDE.md compliance, PEP 8, type hints, and production readiness."
+    prompt: prompts/airflow_prompts/airflow-code-reviewer.md
+    tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+    model: haiku
+
+# Global tools available to orchestrator
+allowed_tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
+
+# Auto-accept edits without prompting
+permission_mode: acceptEdits

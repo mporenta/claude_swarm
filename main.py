@@ -14,7 +14,10 @@ from dotenv import load_dotenv
 
 # Load environment variables first
 load_dotenv()
-
+import json
+import threading
+import signal
+import os
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
 import sys  # noqa: E402
@@ -115,7 +118,6 @@ def build_context(args: argparse.Namespace) -> dict | None:
     if not args.context:
         return None
 
-    import json
 
     try:
         return json.loads(args.context)
@@ -128,17 +130,21 @@ async def main_async():
     """Async main function."""
     # Parse arguments
     args = parse_arguments()
+    logger.debug(f"Arguments parsed: {args}")
 
     # Get configuration path
     config_path = get_config_path(args)
+    logger.debug(f"Configuration path: {config_path}")
 
     # Build context
     context = build_context(args)
+    logger.debug(f"Context built: {context}")
 
     try:
         # Initialize orchestrator
-        logger.info(f"Initializing orchestrator with config: {config_path}")
+        logger.debug(f"Initializing orchestrator with config: {config_path}")
         orchestrator = SwarmOrchestrator(config_path=config_path, context=context)
+        logger.debug(f"Orchestrator initialized successfully with object: {orchestrator}")
 
         # Run orchestration
         await orchestrator.run_orchestration(main_prompt=args.task)
@@ -166,4 +172,58 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import time
+    claude_connection = None
+    
+    args = parse_arguments()
+    logger.debug(f"Arguments parsed: {args}")
+
+    # Get configuration path
+    config_path = get_config_path(args)
+    logger.debug(f"Configuration path: {config_path}")
+
+    # Build context
+    context = build_context(args)
+    logger.debug(f"Context built: {context}")
+    
+
+    try:
+        # Initialize orchestrator
+        logger.debug(f"Initializing orchestrator with config: {config_path}")
+        orchestrator = SwarmOrchestrator(config_path=config_path, context=context)
+        logger.debug(f"Orchestrator initialized successfully with object: {orchestrator}")
+        if orchestrator.client:
+            claude_connection = orchestrator.client
+
+        # Run orchestration
+        asyncio.run(orchestrator.run_orchestration(main_prompt=args.task))
+
+    except KeyboardInterrupt:
+        console.print("\n\n[yellow]Interrupted by user. Exiting...[/yellow]")
+        asyncio.run(orchestrator._disconnect_from_claude("main KeyboardInterrupt"))
+        time.sleep(1)
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        console.print(f"\n[red]❌ Fatal error: {e}[/red]")
+        sys.exit(1)
+    def force_exit():
+        logger.warning("Forcing application exit after timeout")
+        # Use os._exit instead of sys.exit to force termination
+        os._exit(0)
+
+    # Add signal handlers that include a force-exit failsafe 
+    def handle_exit(sig, frame):
+        logger.info(f"Received signal {sig} - initiating graceful shutdown")
+        asyncio.run(orchestrator._disconnect_from_claude("handle_exit"))
+
+        # Set a timeout to force exit if needed
+        timer = threading.Timer(1.0, force_exit)
+        timer.daemon = True  # Make sure the timer doesn't prevent exit
+        timer.start()
+
+        # Let the normal shutdown process continue 
+
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)

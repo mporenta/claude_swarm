@@ -8,6 +8,8 @@ import os
 import signal
 import sys
 import time
+import asyncio
+import yaml
 from pathlib import Path
 from typing import Optional
 
@@ -17,11 +19,12 @@ from rich.table import Table
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
+    ClaudeAgentOptions,
     AssistantMessage,
     ResultMessage,
     TextBlock,
     ToolUseBlock,
-    ThinkingBlock,
+    ThinkingBlock
 )
 
 from src.config_loader import load_agent_options_from_yaml
@@ -45,7 +48,8 @@ class SwarmOrchestrator:
     def __init__(
         self,
         config_path: str | Path,
-        context: Optional[dict] = None,
+        context: Optional[dict] = None
+
     ):
         """
         Initialize orchestrator with configuration from YAML.
@@ -56,35 +60,129 @@ class SwarmOrchestrator:
         """
         self.config_path = Path(config_path)
         self.context = context or self._build_default_context()
-        self.options = None
-        self.client = None
+        self.options: ClaudeAgentOptions = None
+        self.client:ClaudeSDKClient = None
         self.should_exit = False
+        self.main_prompt_file = None  # Will be loaded from YAML config
 
         # Load configuration
-        self._load_configuration()
+        loaded_config = self._load_configuration()
+        display_message(loaded_config, print_raw=True)
 
         # Initialize client
-        self.client = ClaudeSDKClient(self.options)
+        #self.client = ClaudeSDKClient(self.options)
+
+    async def _disconnect_from_claude(self, function_name: str =""):
+        try:
+            console.print(f"[yellow] ClaudeSDKClient Cleanup initiated by {function_name} [/yellow]")
+            
+            
+            await self.client.disconnect()
+            await asyncio.sleep(0.2)  # Yield control to event loop
+            
+              # Yield control to event loop
+            console.print(f"[yellow] self.client status {self.client} [/yellow]")
+        except Exception as e:
+            logger.error(f"Error during disconnect: {e}")
+
+
+
+
+
+
+
 
     def _build_default_context(self) -> dict:
-        """Build default context for YAML variable substitution."""
+        """
+        Build default context for YAML variable substitution.
+
+        Supports environment variables for flexible path configuration
+        across different machines (local, AWS Bedrock, CI/CD).
+
+        Priority: Environment Variables > Defaults
+        """
         project_root = Path(__file__).resolve().parent.parent
 
+        # Airflow 2.0 paths (check env vars first)
+        airflow_2_root = Path(os.getenv(
+            "AIRFLOW_2_ROOT",
+            project_root / "airflow" / "data-airflow-2"
+        ))
+        airflow_2_dags_dir = Path(os.getenv(
+            "AIRFLOW_2_DAGS_DIR",
+            airflow_2_root / "dags"
+        ))
+
+        # Airflow Legacy paths (check env vars first)
+        airflow_legacy_root = Path(os.getenv(
+            "AIRFLOW_LEGACY_ROOT",
+            project_root / "airflow" / "data-airflow-legacy"
+        ))
+        airflow_legacy_dags_dir = Path(os.getenv(
+            "AIRFLOW_LEGACY_DAGS_DIR",
+            airflow_legacy_root / "dags"
+        ))
+
+        # Airflow home directory
+        airflow_home = Path(os.getenv(
+            "AIRFLOW_HOME",
+            airflow_2_root
+        ))
+
+        # Python path for Airflow imports
+        pythonpath = os.getenv(
+            "PYTHONPATH",
+            "/opt/airflow/dags"
+        )
+
         return {
+            # Claude Swarm project paths
             "project_root": project_root,
             "output_dir": project_root / "generated_code",
-            "airflow_2_dags_dir": (
-                project_root / "airflow" / "data-airflow-2" / "dags"
-            ),
-            "airflow_legacy_dags_dir": (
-                project_root / "airflow" / "data-airflow-legacy" / "dags"
-            ),
+
+            # Airflow 2.0 paths
+            "AIRFLOW_2_ROOT": airflow_2_root,
+            "AIRFLOW_2_DAGS_DIR": airflow_2_dags_dir,
+            "airflow_2_dags_dir": airflow_2_dags_dir,  # backward compat
+
+            # Airflow Legacy paths
+            "AIRFLOW_LEGACY_ROOT": airflow_legacy_root,
+            "AIRFLOW_LEGACY_DAGS_DIR": airflow_legacy_dags_dir,
+            "airflow_legacy_dags_dir": airflow_legacy_dags_dir,  # backward compat
+
+            # Airflow configuration
+            "AIRFLOW_HOME": airflow_home,
+            "PYTHONPATH": pythonpath,
+
+            # Model configuration
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "sonnet"),
         }
 
     def _load_configuration(self):
         """Load ClaudeAgentOptions from YAML configuration file."""
         try:
+            # First, load raw YAML to extract main_prompt_file
+            with open(self.config_path, 'r', encoding='utf-8') as fh:
+                raw_config = yaml.safe_load(fh) or {}
+
+            # Extract main_prompt_file if present
+            if "main_prompt_file" in raw_config:
+                self.main_prompt_file = raw_config["main_prompt_file"]
+                # Apply context substitution to the path
+                if self.main_prompt_file:
+                    try:
+                        # Convert Path objects in context to strings
+                        context_for_format = {
+                            k: str(v) if isinstance(v, Path) else v
+                            for k, v in self.context.items()
+                        }
+                        self.main_prompt_file = self.main_prompt_file.format(
+                            **context_for_format
+                        )
+                    except KeyError:
+                        pass  # Keep original if substitution fails
+                logger.debug(f"Found main_prompt_file in YAML: {self.main_prompt_file}")
+
             # Load the main orchestrator prompt if specified in context
             if "orchestrator_agent" not in self.context:
                 # Try to load from default locations
@@ -100,7 +198,7 @@ class SwarmOrchestrator:
                         self.context["orchestrator_agent"] = (
                             load_markdown_for_prompt(str(prompt_path))
                         )
-                        logger.info(
+                        logger.debug(
                             f"Loaded orchestrator prompt from: {prompt_file}"
                         )
                         break
@@ -110,12 +208,13 @@ class SwarmOrchestrator:
                 self.config_path,
                 context=self.context
             )
+            logger.debug(f"Loaded agent options from YAML: {self.options}")
 
-            logger.info(
+            logger.debug(
                 f"Successfully loaded configuration from: "
                 f"{self.config_path}"
             )
-            logger.info(
+            logger.debug(
                 f"Agents configured: {list(self.options.agents.keys())}"
             )
 
@@ -134,36 +233,34 @@ class SwarmOrchestrator:
             main_prompt: Optional main task prompt. If not provided, will be loaded
                         from the configuration or prompted from user.
         """
-        # Setup signal handling
-        def signal_handler(_signum, _frame):
-            """Handle interrupt signals gracefully."""
-            console.print(
-                "\n\n[yellow]Received interrupt signal. "
-                "Shutting down...[/yellow]"
-            )
-            self.should_exit = True
-            sys.exit(0)
-
-        signal.signal(signal.SIGINT, signal_handler)
-
+        
         # Display configuration info
-        self._display_orchestrator_info()
-
-        # Get main prompt if not provided
-        if not main_prompt:
-            main_prompt = self._get_main_prompt()
-
-        # Metrics tracking
-        start_time = time.perf_counter()
-        iteration_count = 0
-        tool_use_count = 0
-        thinking_count = 0
-        text_block_count = 0
-        files_created = []
-        iteration_times = []
-        iteration_costs = []
+        
+        
 
         try:
+            self._display_orchestrator_info()
+            self.client = ClaudeSDKClient(self.options)
+            agent_model = self.options.agents.get("model")
+            display_message(f"Using agent model: {agent_model}")
+
+            # Get main prompt if not provided
+            logger.debug(f"Main prompt is {main_prompt}")
+            if not main_prompt:
+                await asyncio.sleep(0.1)  # Yield control to event loop
+                main_prompt = self._get_main_prompt()
+                #logger.debug(f"User entered task: {main_prompt}")
+
+            # Metrics tracking
+            start_time = time.perf_counter()
+            iteration_count = 0
+            tool_use_count = 0
+            thinking_count = 0
+            text_block_count = 0
+            files_created = []
+            iteration_times = []
+            iteration_costs = []
+
             async with self.client:
                 # Send initial query
                 await self.client.query(prompt=main_prompt)
@@ -179,11 +276,8 @@ class SwarmOrchestrator:
                 # Process responses
                 async for message in self.client.receive_response():
                     message_count += 1
+                    display_message(message, print_raw=True)
 
-                    # Skip StreamEvent messages
-                    from claude_agent_sdk.types import StreamEvent
-                    if isinstance(message, StreamEvent):
-                        continue
 
                     iteration_count += 1
                     iteration_start_time = time.perf_counter()
@@ -248,11 +342,12 @@ class SwarmOrchestrator:
                         break
 
         except KeyboardInterrupt:
-            console.print("\n\n[yellow]Orchestration interrupted by user![/yellow]")
+            console.print("\n\n[yellow]Orchestration interrupted by user during orchestration[/yellow]")
+            await self._disconnect_from_claude("run_orchestration")
         except Exception as e:
             logger.error(f"Orchestration failed: {e}", exc_info=True)
             console.print(f"\n[red]❌ Orchestration failed: {e}[/red]")
-            raise
+            raise 
 
     def _display_orchestrator_info(self):
         """Display information about the loaded configuration."""
@@ -284,12 +379,36 @@ class SwarmOrchestrator:
         """
         Get the main task prompt.
 
-        Checks for main_prompt in YAML config, otherwise prompts user.
+        Checks for main_prompt_file in YAML config first, otherwise prompts user.
         """
-        # Check if main_prompt is specified in context
+        # Check if main_prompt_file was loaded from YAML config
+        if self.main_prompt_file:
+            prompt_path = Path(self.main_prompt_file)
+
+            if prompt_path.exists():
+                logger.info(
+                    f"Loading main prompt from YAML config: {self.main_prompt_file}"
+                )
+                console.print(
+                    f"\n[dim]📄 Using prompt from: {prompt_path}[/dim]"
+                )
+                return load_markdown_for_prompt(str(prompt_path))
+            else:
+                logger.warning(
+                    f"main_prompt_file specified but not found: {prompt_path}"
+                )
+                console.print(
+                    f"[yellow]⚠️  Warning: Prompt file not found: {prompt_path}[/yellow]"
+                )
+
+        # Fallback: Check if main_prompt_file is specified in context (legacy)
         if "main_prompt_file" in self.context:
             prompt_path = Path(self.context["main_prompt_file"])
+
             if prompt_path.exists():
+                logger.info(
+                    f"Loading main prompt from context: {self.context['main_prompt_file']}"
+                )
                 return load_markdown_for_prompt(str(prompt_path))
 
         # Interactive mode - ask user
@@ -297,6 +416,7 @@ class SwarmOrchestrator:
         console.print("[dim](Or 'exit' to quit)[/dim]\n")
 
         task = Prompt.ask("[bold]Task")
+        logger.debug(f"User entered task: {task}")
 
         if task.lower() == "exit":
             sys.exit(0)

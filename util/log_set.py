@@ -43,21 +43,10 @@ class LogConfig:
         self.log_level = log_level
 
         # Common format for all logs
-        self.log_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-            "<level>{message}</level>"
-        )
+        self.log_format = self._format_log
 
         # Format for detailed debugging
-        self.debug_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-            "Process: {process} | Thread: {thread} | "
-            "<level>{message}</level>"
-        )
+        self.debug_format = self._format_debug
 
         # Pretty format for structured data
         self.pretty_format = lambda record: self._format_record(record)
@@ -97,6 +86,38 @@ class LogConfig:
             msg = f"\n{formatted_list}"
 
         return msg
+
+    def _format_log(self, record):
+        """Format log record with relative file path"""
+        if record["file"].path == '<string>':
+            rel_file = 'inline'
+        else:
+            rel_file = os.path.relpath(record["file"].path, self.root_dir)
+        # Escape angle brackets and curly braces in the message to prevent conflicts with colorizer and format placeholders
+        message = record['message'].replace('{', '{{').replace('}', '}}').replace('<', '&lt;').replace('>', '&gt;')
+        return (
+            f"<green>{record['time'].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}</green> | "
+            f"<level>{record['level']: <8}</level> | "
+            f"<cyan>{rel_file}:{record['line']}</cyan> | "
+            f"<level>{message}</level>"
+        )
+
+
+    def _format_debug(self, record):
+        """Format debug log record with relative file path"""
+        if record["file"].path == '<string>':
+            rel_file = 'inline'
+        else:
+            rel_file = os.path.relpath(record["file"].path, self.root_dir)
+        # Escape angle brackets and curly braces in the message to prevent conflicts with colorizer and format placeholders
+        message = record['message'].replace('{', '{{').replace('}', '}}').replace('<', '&lt;').replace('>', '&gt;')
+        return (
+            f"<green>{record['time'].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}</green> | "
+            f"<level>{record['level']: <8}</level> | "
+            f"<cyan>{rel_file}:{record['line']}</cyan> | "
+            f"Process: {record['process']} | Thread: {record['thread']} | "
+            f"<level>{message}</level>"
+        )
 
     def setup(self, log_level="DEBUG"):
         """Set up logging configuration"""
@@ -176,10 +197,7 @@ class LogConfig:
                 enqueue=True,
             )
         self._configured = True
-        logger.debug(
-            f"Logging configured with dated files: {app_log_path}, "
-            f"{error_log_path}, {debug_log_path}"
-        )
+        
 
     def _today_str(self) -> str:
         """Return today's date string in the configured timezone (YYYY_MM_DD)."""
@@ -224,6 +242,14 @@ class LogConfig:
                     print(f"[LogConfig] Failed to remove old log {fname}: {e}")
         if removed:
             print(f"[LogConfig] Removed outdated log files: {', '.join(removed)}")
+
+    def log_to_file_only(self, message: str, level: str = "DEBUG"):
+        """Log a message to file only, without console output"""
+        today_str = self._today_str()
+        log_file = os.path.join(self.logs_dir, f"{today_str}_file_only.log")
+        timestamp = datetime.now(self.tz_name).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{timestamp} | {level} | {message}\n")
 
 
 # Create global instance

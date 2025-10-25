@@ -1,5 +1,6 @@
 import time, os
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from rich import print
 from claude_agent_sdk import (
@@ -23,6 +24,7 @@ class AirflowAgentSession:
         options: ClaudeAgentOptions = None,
         project_dir: str = Path(__file__).resolve().parent,
     ):
+        self.iteration_logs = [] 
         self.options = options
         self.client = ClaudeSDKClient(self.options)
         self.turn_count = 0
@@ -64,7 +66,6 @@ class AirflowAgentSession:
                 continue
             else:
                 # Send message - Claude remembers all previous messages in this session
-                await self.client.connect()
                 await self.client.query(user_input)
                 self.turn_count += 1
 
@@ -90,7 +91,7 @@ class AirflowAgentSession:
 
         # Load the main orchestrator prompt
         main_prompt = load_markdown_for_prompt(
-            "prompts/airflow_prompts/airflow-orchestrator.md"
+            "prompts/airflow_prompts/airflow-orchestrator-v2.md"
         )
 
         # Get user requirements
@@ -107,9 +108,8 @@ Create a new Airflow 2 DAG with the following requirements:
 **Description:** {description}
 
 Follow the complete orchestration process:
-1. Use @dag-architect to design the DAG structure
-2. Use @dag-developer to implement the code
-3. Use @airflow-code-reviewer to verify compliance
+1. Use @dag-developer to implement the code
+2. Use @airflow-code-reviewer to verify compliance
 
 Ensure all CLAUDE.md standards are followed, including:
 - Proper directory structure: dags/{dag_name}/
@@ -134,6 +134,9 @@ Create complete, production-ready code.
         thinking_count = 0
         files_created = []
         agent_switches = 0
+        max_iterations = 10
+        iteration = 0
+        start_time = datetime.now()
 
         # Combine orchestrator instructions with specific creation request
         combined_prompt = f"{main_prompt}\n\n{creation_request}"
@@ -198,7 +201,7 @@ Create complete, production-ready code.
 
         # Load the main orchestrator prompt
         main_prompt = load_markdown_for_prompt(
-            "prompts/airflow_prompts/airflow-orchestrator.md"
+            "prompts/airflow_prompts/airflow-orchestrator-v2.md"
         )
 
         # Get user requirements
@@ -213,10 +216,9 @@ Migrate an Airflow 1.0 DAG to Airflow 2.0 with full modernization.
 
 Follow the complete migration orchestration process:
 1. Use @migration-specialist to analyze the legacy DAG and identify all required changes
-2. Use @dag-architect to design the modernized structure
-3. Use @migration-specialist to implement the migration
-4. Use @dag-developer for any additional enhancements
-5. Use @airflow-code-reviewer to verify complete compliance
+2. Use @migration-specialist to implement the migration
+3. Use @dag-developer for any additional enhancements
+4. Use @airflow-code-reviewer to verify complete compliance
 
 Migration must include:
 - Update all imports to Airflow 2.0 provider-based structure
@@ -244,10 +246,13 @@ Create production-ready, modernized code following all CLAUDE.md standards.
         thinking_count = 0
         files_created = []
         agent_switches = 0
+        start_time = datetime.now()
 
         # Combine orchestrator instructions with specific migration request
         combined_prompt = f"{main_prompt}\n\n{migration_request}"
 
+        # FIXED: Send prompt once and let agent complete the work
+        # The agent will orchestrate the migration workflow using subagents
         async with self.client as self.client_agent:
             await self.client_agent.query(prompt=combined_prompt)
             async for message in self.client_agent.receive_response():
@@ -292,11 +297,11 @@ Create production-ready, modernized code following all CLAUDE.md standards.
                         for file in files_created:
                             display_message(f"   • {file}")
 
-                    end = time.perf_counter()
-                    time_elapsed = (end - start) / 60
-                    display_message(
-                        f"\n[bold]⏱️ Total time elapsed: {time_elapsed:.2f} minutes[/bold]\n"
-                    )
+        end_time = datetime.now()
+        total_elapsed = (end_time - start_time).total_seconds()
+        display_message(f"[bold cyan]Total Orchestration Time: {total_elapsed:.2f} seconds[/bold cyan]")
+
+
 
 
 if __name__ == "__main__":
@@ -346,8 +351,8 @@ if __name__ == "__main__":
     )
 
     # Additional directory access for airflow DAGs
-    airflow_2_dags_dir = project_root / "data-airflow" / "dags"
-    airflow_legacy_dags_dir = project_root / "data-airflow-legacy" / "dags"
+    airflow_2_dags_dir = project_root / "airflow" / "data-airflow" / "dags"
+    airflow_legacy_dags_dir = project_root / "airflow" / "data-airflow-legacy" / "dags"
 
     options = ClaudeAgentOptions(
         system_prompt="claude_code",
@@ -369,23 +374,18 @@ if __name__ == "__main__":
             "OUTPUT_DIR": str(output_dir),
         },
         agents={
-            "dag-architect": AgentDefinition(
-                description="Expert Airflow architect for planning DAG structure and dependencies.",
-                prompt=dag_architect_prompt,
-                tools=["Read", "Grep", "Glob"],
-                model="sonnet",
-            ),
+            
             "dag-developer": AgentDefinition(
                 description="Expert Airflow 2 developer for writing production-ready DAG code.",
                 prompt=dag_developer_prompt,
                 tools=["Read", "Write", "Edit", "Bash", "Grep"],
-                model="sonnet",
+                model="haiku",
             ),
             "migration-specialist": AgentDefinition(
                 description="Expert in migrating Airflow 1.0 DAGs to 2.0 with modernization.",
                 prompt=migration_specialist_prompt,
                 tools=["Read", "Write", "Edit", "Grep", "Glob"],
-                model="sonnet",
+                model="haiku",
             ),
             "airflow-code-reviewer": AgentDefinition(
                 description="Code review specialist for Airflow best practices and CLAUDE.md compliance.",

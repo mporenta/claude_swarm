@@ -214,10 +214,10 @@ Provide structured feedback:
    - Good patterns to highlight
    - Excellent documentation
 
-## Create tasks for @dag-architect agent with any fixes or improvements that need to be addressed
+## Create tasks for @dag-developer agent with any fixes or improvements that need to be addressed
  - Provide the file name, path, and line number for each issue found
  - Give a clear reason why this must be looked at.
- - Do not be perscriptive with your tasks, let @dag-architect be the architect
+ - Do not be perscriptive with your tasks, let @dag-developer be the developer
  - Remember these tasks so they can be prioritized on your next code review after the the issues have been addressed 
 
 Be thorough, constructive, and focused on maintainability.

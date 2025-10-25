@@ -305,10 +305,6 @@ pytz>=2023.0              # Timezone support
 4. Test thoroughly
 5. Submit a pull request
 
-## License
-
-See [LICENSE](LICENSE) file for details.
-
 ## Resources
 
 - [Claude Agent SDK Documentation](https://docs.claude.com/en/api/agent-sdk/python)

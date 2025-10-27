@@ -4,8 +4,9 @@ claude-agent-sdk>=0.1.0   # Multi-agent orchestration framework
 # Terminal and Display
 rich>=13.0.0              # Terminal formatting and output
 
-# Logging
+# Logging and Monitoring
 loguru>=0.7.0             # Advanced logging with rotation
+sentry-sdk>=2.0.0         # Error tracking and performance monitoring
 
 # Configuration
 python-dotenv>=1.0.0      # Environment variable management
@@ -17,3 +18,5 @@ tzlocal>=5.0.0            # Local timezone detection
 
 # Async Support
 anyio>=4.0.0              # Async I/O compatibility layer
+
+dotenv>=1.20.0            # .env file support

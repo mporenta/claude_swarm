@@ -27,12 +27,26 @@ from claude_agent_sdk import (
     CLINotFoundError,
     ProcessError,
     CLIJSONDecodeError,
+    create_sdk_mcp_server,
 )
 
 from src.config_loader import load_agent_options_from_yaml
 from util.helpers import load_markdown_for_prompt, display_message, debug_log
 from util.log_set import logger
 from util.agent_loader import discover_agents
+
+# Import migration tools for MCP server
+try:
+    from src.tools.migration_tools import (
+        detect_legacy_imports,
+        detect_deprecated_parameters,
+        compare_dags,
+    )
+
+    MIGRATION_TOOLS_AVAILABLE = True
+except ImportError:
+    logger.warning("Migration tools not available - MCP server will not be created")
+    MIGRATION_TOOLS_AVAILABLE = False
 
 console = Console()
 
@@ -95,19 +109,24 @@ class SwarmOrchestrator:
         Priority: Environment Variables > Defaults
         """
         project_root = Path(__file__).resolve().parent.parent
+        # Workspace root is where the script is executed from (parent of project_root)
+        workspace_root = project_root.parent.parent
 
-        # Airflow 2.0 paths (check env vars first)
+        # Airflow 2.0 paths (check env vars first, then use workspace-relative paths)
         airflow_2_root = Path(
-            os.getenv("AIRFLOW_2_ROOT", project_root / "airflow" / "data-airflow")
+            os.getenv(
+                "AIRFLOW_2_ROOT", workspace_root / "aptive_github" / "data-airflow"
+            )
         )
         airflow_2_dags_dir = Path(
             os.getenv("AIRFLOW_2_DAGS_DIR", airflow_2_root / "dags")
         )
 
-        # Airflow Legacy paths (check env vars first)
+        # Airflow Legacy paths (check env vars first, then use workspace-relative paths)
         airflow_legacy_root = Path(
             os.getenv(
-                "AIRFLOW_LEGACY_ROOT", project_root / "airflow" / "data-airflow-legacy"
+                "AIRFLOW_LEGACY_ROOT",
+                workspace_root / "aptive_github" / "data-airflow-legacy",
             )
         )
         airflow_legacy_dags_dir = Path(
@@ -138,6 +157,36 @@ class SwarmOrchestrator:
             # Model configuration
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "sonnet"),
         }
+
+    def _create_tool_servers(self) -> dict:
+        """
+        Create MCP tool servers for specialized functionality.
+
+        Returns:
+            Dictionary of MCP servers keyed by server name
+        """
+        mcp_servers = {}
+
+        # Create migration tools MCP server if available
+        if MIGRATION_TOOLS_AVAILABLE:
+            try:
+                migration_server = create_sdk_mcp_server(
+                    name="migration",
+                    version="1.0.0",
+                    tools=[
+                        detect_legacy_imports,
+                        detect_deprecated_parameters,
+                        compare_dags,
+                    ],
+                )
+                mcp_servers["migration"] = migration_server
+                logger.info("Created migration tools MCP server with 3 tools")
+            except Exception as e:
+                logger.error(f"Failed to create migration MCP server: {e}")
+        else:
+            logger.debug("Migration tools not available - skipping MCP server creation")
+
+        return mcp_servers
 
     def _load_configuration(self):
         """Load ClaudeAgentOptions from YAML configuration file."""
@@ -183,6 +232,20 @@ class SwarmOrchestrator:
                 self.config_path, context=self.context
             )
             logger.debug(f"Loaded agent options from YAML: {self.options}")
+
+            # Create and integrate MCP tool servers
+            mcp_servers = self._create_tool_servers()
+            if mcp_servers:
+                # Add MCP servers to options
+                if (
+                    not hasattr(self.options, "mcp_servers")
+                    or self.options.mcp_servers is None
+                ):
+                    self.options.mcp_servers = {}
+                self.options.mcp_servers.update(mcp_servers)
+                logger.info(
+                    f"Integrated {len(mcp_servers)} MCP server(s): {list(mcp_servers.keys())}"
+                )
 
             # Discover and merge frontmatter agents from .claude/agents/
             project_root = Path(__file__).resolve().parent.parent
@@ -556,7 +619,6 @@ def interactive_config_selection(config_dir: Path) -> Path:
         choice = Prompt.ask(
             "[bold]Select configuration number (or 'exit' to quit)[/bold]", default="1"
         )
-        
 
         if choice.lower() == "exit":
             sys.exit(0)

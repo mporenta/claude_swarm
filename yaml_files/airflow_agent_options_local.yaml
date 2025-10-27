@@ -20,7 +20,7 @@ model: "{CLAUDE_MODEL}"
 
 # Main prompt file for Airflow migration tasks
 # This file should be in the claude_swarm repo (stable location)
-main_prompt_file: airflow/airflow_v2_CLAUDE.md
+main_prompt_file: "{project_root}/prompts/airflow_prompts/airflow_v2_CLAUDE.md"
 
 # Load project-level CLAUDE.md files if present
 setting_sources:
@@ -78,6 +78,10 @@ agents:
       - Edit
       - Grep
       - Glob
+      # Migration analysis MCP tools
+      - mcp__migration__detect_legacy_imports
+      - mcp__migration__detect_deprecated_parameters
+      - mcp__migration__compare_dags
     model: haiku
 
   airflow-code-reviewer:
@@ -88,6 +92,9 @@ agents:
       - Grep
       - Glob
       - Bash
+      # Migration analysis MCP tools for validation
+      - mcp__migration__detect_legacy_imports
+      - mcp__migration__detect_deprecated_parameters
     model: haiku
 
 # Global tools available to orchestrator
@@ -98,6 +105,10 @@ allowed_tools:
   - Bash
   - Grep
   - Glob
+  # Migration analysis MCP tools
+  - mcp__migration__detect_legacy_imports
+  - mcp__migration__detect_deprecated_parameters
+  - mcp__migration__compare_dags
 
 # Auto-accept edits without prompting
 permission_mode: acceptEdits

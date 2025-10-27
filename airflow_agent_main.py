@@ -581,9 +581,6 @@ if __name__ == "__main__":
                 "append": orchestrator_agent,
             },
             model=CLAUDE_MODEL,
-            main_prompt_file=str(
-                project_root / "prompts" / "airflow_prompts" / "airflow_v2_CLAUDE.md"
-            ),
             setting_sources=["project"],
             cwd=str(output_dir),
             add_dirs=[

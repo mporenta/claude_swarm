@@ -6,18 +6,54 @@ from typing import Dict, Any, Optional
 from tzlocal import get_localzone
 from datetime import datetime, date
 from pathlib import Path
+import sentry_sdk
+import sentry_sdk
+from loguru import logger
+from sentry_sdk.integrations.loguru import LoggingLevels, LoguruIntegration
+from sentry_sdk import logger as sentry_logger
+
 env_log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
 print(f"Log level set to: {env_log_level}")
+
+
+# Initialize Sentry with the Loguru integration
+# Initialize Sentry monitoring
+sentry_dsn = os.getenv("SENTRY_DSN")
+print(f"SENTRY_DSN: {sentry_dsn}")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn="https://586645b1744aa1be7b773837d822f918@o4510262831546368.ingest.us.sentry.io/4510262842490880",
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for tracing.
+        traces_sample_rate=1.0,
+        enable_logs=True,
+        integrations=[
+            # Only send WARNING (and higher) logs to Sentry logs
+            LoguruIntegration(sentry_logs_level=LoggingLevels.DEBUG.value),
+        ],
+    )
+    print("[green]✅ Sentry monitoring initialized[/green]")
+    logger.info("Sentry monitoring initialized")
+else:
+    print("[yellow]⚠️  SENTRY_DSN not set - monitoring disabled[/yellow]")
+    logger.info("SENTRY_DSN not set, monitoring disabled")
+
+
+# Add a Sentry handler as a Loguru sink
+def sentry_sink(message):
+    record = message.record
+    if record["level"].no >= 10:  # 10 = DEBUG, 20 = INFO, 30 = WARNING, etc.
+        sentry_sdk.capture_message(record["message"])
+
+
+# Set Loguru to use the Sentry sink for debug (or any level you prefer)
 
 
 class LogConfig:
     """Centralized logging configuration for the application"""
 
     def __init__(
-        self,
-        root_dir: str = None,
-        timezone: str = None,
-        log_level: str = "DEBUG"
+        self, root_dir: str = None, timezone: str = None, log_level: str = "DEBUG"
     ):
         self._configured: bool = False
         self.root_dir = root_dir or str(Path(__file__).parent.parent)
@@ -80,21 +116,25 @@ class LogConfig:
             )
             msg = f"\n{formatted_dict}"
         elif isinstance(msg, (list, tuple)):
-            formatted_list = "\n".join(
-                f"    - {format_value(item)}" for item in msg
-            )
+            formatted_list = "\n".join(f"    - {format_value(item)}" for item in msg)
             msg = f"\n{formatted_list}"
 
         return msg
 
     def _format_log(self, record):
         """Format log record with relative file path"""
-        if record["file"].path == '<string>':
-            rel_file = 'inline'
+        if record["file"].path == "<string>":
+            rel_file = "inline"
         else:
             rel_file = os.path.relpath(record["file"].path, self.root_dir)
         # Escape angle brackets and curly braces in the message to prevent conflicts with colorizer and format placeholders
-        message = record['message'].replace('{', '{{').replace('}', '}}').replace('<', '&lt;').replace('>', '&gt;')
+        message = (
+            record["message"]
+            .replace("{", "{{")
+            .replace("}", "}}")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
         return (
             f"<green>{record['time'].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}</green> | "
             f"<level>{record['level']: <8}</level> | "
@@ -102,15 +142,20 @@ class LogConfig:
             f"<level>{message}</level>"
         )
 
-
     def _format_debug(self, record):
         """Format debug log record with relative file path"""
-        if record["file"].path == '<string>':
-            rel_file = 'inline'
+        if record["file"].path == "<string>":
+            rel_file = "inline"
         else:
             rel_file = os.path.relpath(record["file"].path, self.root_dir)
         # Escape angle brackets and curly braces in the message to prevent conflicts with colorizer and format placeholders
-        message = record['message'].replace('{', '{{').replace('}', '}}').replace('<', '&lt;').replace('>', '&gt;')
+        message = (
+            record["message"]
+            .replace("{", "{{")
+            .replace("}", "}}")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
         return (
             f"<green>{record['time'].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}</green> | "
             f"<level>{record['level']: <8}</level> | "
@@ -151,6 +196,7 @@ class LogConfig:
         app_log_path = os.path.join(self.logs_dir, f"{today_str}_app.log")
         error_log_path = os.path.join(self.logs_dir, f"{today_str}_error.log")
         debug_log_path = os.path.join(self.logs_dir, f"{today_str}_debug.log")
+        logger.add(sentry_sink, level="DEBUG")
 
         # Add console logging with standard format
         logger.add(
@@ -197,7 +243,6 @@ class LogConfig:
                 enqueue=True,
             )
         self._configured = True
-        
 
     def _today_str(self) -> str:
         """Return today's date string in the configured timezone (YYYY_MM_DD)."""
@@ -247,8 +292,8 @@ class LogConfig:
         """Log a message to file only, without console output"""
         today_str = self._today_str()
         log_file = os.path.join(self.logs_dir, f"{today_str}_file_only.log")
-        timestamp = datetime.now(self.tz_name).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        with open(log_file, 'a', encoding='utf-8') as f:
+        timestamp = datetime.now(self.tz_name).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"{timestamp} | {level} | {message}\n")
 
 

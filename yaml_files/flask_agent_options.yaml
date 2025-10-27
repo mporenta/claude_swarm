@@ -3,7 +3,7 @@ system_prompt:
   preset: claude_code
   append: "{orchestrator_agent}"
 model: "{CLAUDE_MODEL}"
-main_prompt_file: prompts/main-flask-app-query.md
+main_prompt_file: "{project_root}/prompts/main-flask-app-query.md"
 setting_sources:
   - project
 cwd: "{output_dir}"

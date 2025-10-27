@@ -67,40 +67,74 @@ Create framework-specific configurations in `yaml_files/`:
 system_prompt:
   type: preset
   preset: claude_code
-  append: ${orchestrator_agent}
+  append: "{orchestrator_agent}"
 
-model: ${CLAUDE_MODEL}
-main_prompt_file: prompts/main-query.md
-cwd: ${output_dir}
+model: "{CLAUDE_MODEL}"
+main_prompt_file: prompts/main-flask-app-query.md
+setting_sources:
+  - project
+cwd: "{output_dir}"
+add_dirs:
+  - "{project_root}"
+env:
+  FLASK_ENV: development
+  FLASK_PROJECT_PATH: "{output_dir}"
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
 
 agents:
   flask-developer:
-    description: "Backend Flask development"
+    description: "Expert Flask developer for backend development."
     prompt: prompts/flask-developer.md
-    tools: [Read, Write, Edit, Bash]
+    tools:
+      - Read
+      - Write
+      - Edit
+      - Bash
     model: haiku
 
   frontend-developer:
-    description: "Frontend and UI development"
+    description: "Expert frontend developer for HTML/CSS/JavaScript."
     prompt: prompts/frontend-developer.md
-    tools: [Read, Write, Edit]
+    tools:
+      - Read
+      - Write
+      - Edit
     model: haiku
 
   code-reviewer:
-    description: "Code quality and best practices"
+    description: "Code review specialist for Flask best practices and quality."
     prompt: prompts/code-reviewer.md
-    tools: [Read, Grep, Glob, Bash]
+    tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
     model: haiku
 
-allowed_tools: [Read, Write, Edit, Bash, Grep, Glob]
+allowed_tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
 permission_mode: acceptEdits
 ```
 
 **Variable Substitution:**
-- `${project_root}` - Project root directory
-- `${output_dir}` - Output directory (default: `generated_code/`)
-- `${CLAUDE_MODEL}` - Model from environment variable
-- `${orchestrator_agent}` - System orchestration prompt
+- `"{project_root}"` - Project root directory
+- `"{output_dir}"` - Output directory (default: `generated_code/`)
+- `"{CLAUDE_MODEL}"` - Model from environment variable (sonnet/opus/haiku)
+- `"{orchestrator_agent}"` - System orchestration prompt
+- `"{airflow_2_dags_dir}"` - Airflow 2.x DAGs directory (Airflow configs)
+- `"{airflow_legacy_dags_dir}"` - Legacy Airflow 1.x DAGs directory (Airflow configs)
+
+**Available Configurations in yaml_files/:**
+- `flask_agent_options.yaml` - Flask application development
+- `airflow_agent_options.yaml` - Airflow DAG development
+- `airflow_agent_options_frontmatter.yaml` - Airflow with frontmatter support
+- `airflow_agent_options_local.yaml` - Airflow with local development settings
 
 ## Available Agents
 
@@ -116,10 +150,9 @@ permission_mode: acceptEdits
 
 | Agent | Purpose | Tools |
 |-------|---------|-------|
-| `@dag-architect` | DAG architecture and design | Read, Grep, Glob |
-| `@dag-developer` | DAG implementation | Read, Write, Edit, Bash, Grep |
+| `@dag-developer` | Airflow 2.x DAG implementation | Read, Write, Edit, Bash, Grep |
 | `@migration-specialist` | Airflow 1.x to 2.x migration | Read, Write, Edit, Grep, Glob |
-| `@airflow-code-reviewer` | Airflow best practices | Read, Grep, Glob |
+| `@airflow-code-reviewer` | Airflow best practices and compliance | Read, Grep, Glob |
 
 ## Programmatic Usage
 
@@ -147,20 +180,40 @@ claude_swarm/
 ├── main.py                      # Entry point
 ├── src/                         # Core application
 │   ├── orchestrator.py         # Orchestration logic
-│   └── config_loader.py        # YAML configuration
+│   ├── config_loader.py        # YAML configuration
+│   └── tools/                  # Custom tool implementations
 ├── yaml_files/                  # Agent configurations
 │   ├── flask_agent_options.yaml
 │   └── airflow_agent_options.yaml
 ├── prompts/                     # Agent role definitions
+│   ├── main-flask-app-query.md
 │   ├── flask-developer.md
 │   ├── frontend-developer.md
-│   └── airflow_prompts/
+│   ├── code-reviewer.md
+│   ├── flask_CLAUDE.md         # Flask orchestrator system prompt
+│   └── airflow_prompts/        # Airflow agent prompts
+│       ├── dag-developer.md
+│       ├── migration-specialist.md
+│       └── airflow-code-reviewer.md
 ├── util/                        # Utilities
-│   ├── log_set.py              # Logging
-│   └── helpers.py              # Display utilities
-├── examples/                    # SDK examples
+│   ├── log_set.py              # Logging configuration
+│   ├── helpers.py              # Display utilities
+│   └── agent_loader.py         # Agent loading helpers
+├── airflow/                     # Legacy Airflow orchestrator
+│   └── airflow_agent.py        # Standalone Airflow script
+├── dev/                         # Development scripts
+│   ├── client_query.py         # CLAUDE.md support orchestrator
+│   ├── flask_app_dev.py        # Flask dev orchestrator
+│   └── test_dev.py             # Advanced orchestrator
+├── examples/                    # Example implementations
+│   ├── flask_agent_main.py     # Flask agent example
+│   ├── airflow_agent_main.py   # Airflow agent example
+│   ├── swarm_orchestrator.py   # Swarm orchestration example
+│   └── official_sdk_examples/  # 12 official SDK examples
+├── tests/                       # Test suite
 ├── logs/                        # Application logs
-└── generated_code/             # Output directory
+├── generated_code/             # Output directory
+└── generated_dags/             # Generated Airflow DAGs
 ```
 
 ## Agent Delegation
@@ -225,11 +278,26 @@ Configure via `LOG_LEVEL` environment variable.
 ```bash
 python main.py --help
 
+Claude Swarm Multi-Agent Orchestrator
+
 Options:
   --config, -c CONFIG    Path to YAML configuration file
-  --context CONTEXT      JSON string with context variables
-  --task, -t TASK        Task description (skips interactive prompt)
-  --version, -v          Show version and exit
+  --context CONTEXT      JSON string with context variables for YAML substitution
+  --task, -t TASK        Task description (overrides interactive prompt)
+  --version, -v          Show version and exit (Claude Swarm 1.0.0)
+
+Examples:
+  # Use specific configuration
+  python main.py --config yaml_files/airflow_agent_options.yaml
+
+  # Interactive mode (select from available configs)
+  python main.py
+
+  # Specify custom context variables
+  python main.py --config config.yaml --context '{"project": "/path/to/project"}'
+
+  # Provide task description directly
+  python main.py --config config.yaml --task "Create a Flask REST API"
 ```
 
 ## Troubleshooting
@@ -281,20 +349,24 @@ python main.py --config yaml_files/flask_agent_options.yaml \
 ## Documentation
 
 - **[DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md)** - Troubleshooting and debugging
-- **[flask_CLAUDE.md](flask_CLAUDE.md)** - Flask orchestrator system prompt
-- **[dag_CLAUDE_v2.md](dag_CLAUDE_v2.md)** - Airflow orchestrator system prompt
-- **[examples/](examples/)** - Official Claude Agent SDK examples
+- **[AGENTS.md](AGENTS.md)** - Agent definitions and capabilities reference
+- **[SUBAGENT_PROTOCOL_GUIDE.md](SUBAGENT_PROTOCOL_GUIDE.md)** - Subagent communication protocol
+- **[prompts/flask_CLAUDE.md](prompts/flask_CLAUDE.md)** - Flask orchestrator system prompt
+- **[dev/dag_CLAUDE_v2.md](dev/dag_CLAUDE_v2.md)** - Airflow orchestrator system prompt
+- **[examples/official_sdk_examples/](examples/official_sdk_examples/)** - 12 official Claude Agent SDK examples
 - **[docs/archive/](docs/archive/)** - Historical documentation
 
 ## Dependencies
 
 ```
 claude-agent-sdk>=0.1.0   # Core orchestration framework
-rich>=13.0.0              # Terminal formatting
-loguru>=0.7.0             # Advanced logging
-python-dotenv>=1.0.0      # Environment configuration
-pyyaml>=6.0.0             # YAML parsing
-pytz>=2023.0              # Timezone support
+rich>=13.0.0              # Terminal formatting and output
+loguru>=0.7.0             # Advanced logging with rotation
+python-dotenv>=1.0.0      # Environment variable management
+PyYAML>=6.0               # YAML configuration parsing
+pytz>=2023.0              # Timezone conversions
+tzlocal>=5.0.0            # Local timezone detection
+anyio>=4.0.0              # Async I/O compatibility layer
 ```
 
 ## Contributing

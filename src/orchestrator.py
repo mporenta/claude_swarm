@@ -26,7 +26,7 @@ from claude_agent_sdk import (
     ThinkingBlock,
     CLINotFoundError,
     ProcessError,
-    CLIJSONDecodeError
+    CLIJSONDecodeError,
 )
 
 from src.config_loader import load_agent_options_from_yaml
@@ -48,12 +48,7 @@ class SwarmOrchestrator:
     - Allowed tools and permission modes
     """
 
-    def __init__(
-        self,
-        config_path: str | Path,
-        context: Optional[dict] = None
-
-    ):
+    def __init__(self, config_path: str | Path, context: Optional[dict] = None):
         """
         Initialize orchestrator with configuration from YAML.
 
@@ -64,36 +59,31 @@ class SwarmOrchestrator:
         self.config_path = Path(config_path)
         self.context = context or self._build_default_context()
         self.options: ClaudeAgentOptions = None
-        self.client:ClaudeSDKClient = None
+        self.client: ClaudeSDKClient = None
         self.should_exit = False
         self.main_prompt_file = None  # Will be loaded from YAML config
+        self.turn_count = 0
 
         # Load configuration
         loaded_config = self._load_configuration()
         display_message(loaded_config, print_raw=True)
 
         # Initialize client
-        #self.client = ClaudeSDKClient(self.options)
+        # self.client = ClaudeSDKClient(self.options)
 
-    async def _disconnect_from_claude(self, function_name: str =""):
+    async def _disconnect_from_claude(self, function_name: str = ""):
         try:
-            console.print(f"[yellow] ClaudeSDKClient Cleanup initiated by {function_name} [/yellow]")
-            
-            
+            console.print(
+                f"[yellow] ClaudeSDKClient Cleanup initiated by {function_name} [/yellow]"
+            )
+
             await self.client.disconnect()
             await asyncio.sleep(0.2)  # Yield control to event loop
-            
-              # Yield control to event loop
+
+            # Yield control to event loop
             console.print(f"[yellow] self.client status {self.client} [/yellow]")
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
-
-
-
-
-
-
-
 
     def _build_default_context(self) -> dict:
         """
@@ -107,56 +97,44 @@ class SwarmOrchestrator:
         project_root = Path(__file__).resolve().parent.parent
 
         # Airflow 2.0 paths (check env vars first)
-        airflow_2_root = Path(os.getenv(
-            "AIRFLOW_2_ROOT",
-            project_root / "airflow" / "data-airflow"
-        ))
-        airflow_2_dags_dir = Path(os.getenv(
-            "AIRFLOW_2_DAGS_DIR",
-            airflow_2_root / "dags"
-        ))
+        airflow_2_root = Path(
+            os.getenv("AIRFLOW_2_ROOT", project_root / "airflow" / "data-airflow")
+        )
+        airflow_2_dags_dir = Path(
+            os.getenv("AIRFLOW_2_DAGS_DIR", airflow_2_root / "dags")
+        )
 
         # Airflow Legacy paths (check env vars first)
-        airflow_legacy_root = Path(os.getenv(
-            "AIRFLOW_LEGACY_ROOT",
-            project_root / "airflow" / "data-airflow-legacy"
-        ))
-        airflow_legacy_dags_dir = Path(os.getenv(
-            "AIRFLOW_LEGACY_DAGS_DIR",
-            airflow_legacy_root / "dags"
-        ))
+        airflow_legacy_root = Path(
+            os.getenv(
+                "AIRFLOW_LEGACY_ROOT", project_root / "airflow" / "data-airflow-legacy"
+            )
+        )
+        airflow_legacy_dags_dir = Path(
+            os.getenv("AIRFLOW_LEGACY_DAGS_DIR", airflow_legacy_root / "dags")
+        )
 
         # Airflow home directory
-        airflow_home = Path(os.getenv(
-            "AIRFLOW_HOME",
-            airflow_2_root
-        ))
+        airflow_home = Path(os.getenv("AIRFLOW_HOME", airflow_2_root))
 
         # Python path for Airflow imports
-        pythonpath = os.getenv(
-            "PYTHONPATH",
-            "/opt/airflow/dags"
-        )
+        pythonpath = os.getenv("PYTHONPATH", "/opt/airflow/dags")
 
         return {
             # Claude Swarm project paths
             "project_root": project_root,
             "output_dir": project_root / "generated_code",
-
             # Airflow 2.0 paths
             "AIRFLOW_2_ROOT": airflow_2_root,
             "AIRFLOW_2_DAGS_DIR": airflow_2_dags_dir,
             "airflow_2_dags_dir": airflow_2_dags_dir,  # backward compat
-
             # Airflow Legacy paths
             "AIRFLOW_LEGACY_ROOT": airflow_legacy_root,
             "AIRFLOW_LEGACY_DAGS_DIR": airflow_legacy_dags_dir,
             "airflow_legacy_dags_dir": airflow_legacy_dags_dir,  # backward compat
-
             # Airflow configuration
             "AIRFLOW_HOME": airflow_home,
             "PYTHONPATH": pythonpath,
-
             # Model configuration
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "sonnet"),
         }
@@ -165,7 +143,7 @@ class SwarmOrchestrator:
         """Load ClaudeAgentOptions from YAML configuration file."""
         try:
             # First, load raw YAML to extract main_prompt_file
-            with open(self.config_path, 'r', encoding='utf-8') as fh:
+            with open(self.config_path, "r", encoding="utf-8") as fh:
                 raw_config = yaml.safe_load(fh) or {}
 
             # Extract main_prompt_file if present
@@ -190,26 +168,19 @@ class SwarmOrchestrator:
             if "orchestrator_agent" not in self.context:
                 # Try to load from default locations
                 project_root = Path(__file__).resolve().parent.parent
-                prompt_files = [
-                    "dag_CLAUDE_v2.md",
-                    "flask_CLAUDE.md",
-                    "CLAUDE.md"
-                ]
+                prompt_files = ["dag_CLAUDE_v2.md", "flask_CLAUDE.md", "CLAUDE.md"]
                 for prompt_file in prompt_files:
                     prompt_path = project_root / prompt_file
                     if prompt_path.exists():
-                        self.context["orchestrator_agent"] = (
-                            load_markdown_for_prompt(str(prompt_path))
+                        self.context["orchestrator_agent"] = load_markdown_for_prompt(
+                            str(prompt_path)
                         )
-                        logger.debug(
-                            f"Loaded orchestrator prompt from: {prompt_file}"
-                        )
+                        logger.debug(f"Loaded orchestrator prompt from: {prompt_file}")
                         break
 
             # Load options from YAML with context
             self.options = load_agent_options_from_yaml(
-                self.config_path,
-                context=self.context
+                self.config_path, context=self.context
             )
             logger.debug(f"Loaded agent options from YAML: {self.options}")
 
@@ -218,7 +189,9 @@ class SwarmOrchestrator:
             frontmatter_agents = discover_agents(project_root)
 
             if frontmatter_agents:
-                logger.info(f"Discovered {len(frontmatter_agents)} frontmatter agent(s) from .claude/agents/")
+                logger.info(
+                    f"Discovered {len(frontmatter_agents)} frontmatter agent(s) from .claude/agents/"
+                )
 
                 # Merge frontmatter agents with YAML agents
                 # Frontmatter agents have lower priority than YAML config
@@ -227,21 +200,17 @@ class SwarmOrchestrator:
                         self.options.agents[agent_name] = agent_def
                         logger.info(f"Added frontmatter agent: {agent_name}")
                     else:
-                        logger.debug(f"Skipped frontmatter agent '{agent_name}' (overridden by YAML config)")
+                        logger.debug(
+                            f"Skipped frontmatter agent '{agent_name}' (overridden by YAML config)"
+                        )
 
             logger.debug(
-                f"Successfully loaded configuration from: "
-                f"{self.config_path}"
+                f"Successfully loaded configuration from: " f"{self.config_path}"
             )
-            logger.debug(
-                f"Agents configured: {list(self.options.agents.keys())}"
-            )
+            logger.debug(f"Agents configured: {list(self.options.agents.keys())}")
 
         except Exception as e:
-            logger.error(
-                f"Failed to load configuration: {e}",
-                exc_info=True
-            )
+            logger.error(f"Failed to load configuration: {e}", exc_info=True)
             raise
 
     async def run_orchestration(self, main_prompt: Optional[str] = None):
@@ -252,10 +221,8 @@ class SwarmOrchestrator:
             main_prompt: Optional main task prompt. If not provided, will be loaded
                         from the configuration or prompted from user.
         """
-        
+
         # Display configuration info
-        
-        
 
         try:
             self._display_orchestrator_info()
@@ -268,7 +235,7 @@ class SwarmOrchestrator:
             if not main_prompt:
                 await asyncio.sleep(0.1)  # Yield control to event loop
                 main_prompt = self._get_main_prompt()
-                #logger.debug(f"User entered task: {main_prompt}")
+                # logger.debug(f"User entered task: {main_prompt}")
 
             # Metrics tracking
             start_time = time.perf_counter()
@@ -283,6 +250,7 @@ class SwarmOrchestrator:
             async with self.client:
                 # Send initial query
                 await self.client.query(prompt=main_prompt)
+                self.turn_count += 1
 
                 display_message(
                     f"\n[bold blue]{'='*60}[/bold blue]\n"
@@ -296,7 +264,6 @@ class SwarmOrchestrator:
                 async for message in self.client.receive_response():
                     message_count += 1
                     display_message(message, print_raw=True)
-
 
                     iteration_count += 1
                     iteration_start_time = time.perf_counter()
@@ -314,6 +281,7 @@ class SwarmOrchestrator:
 
                     # Track metrics
                     if isinstance(message, AssistantMessage):
+                        self.turn_count += 1
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 text_block_count += 1
@@ -321,19 +289,12 @@ class SwarmOrchestrator:
                                 thinking_count += 1
                             elif isinstance(block, ToolUseBlock):
                                 tool_use_count += 1
-                                if (
-                                    block.name == "Write"
-                                    and "file_path" in block.input
-                                ):
-                                    files_created.append(
-                                        block.input["file_path"]
-                                    )
+                                if block.name == "Write" and "file_path" in block.input:
+                                    files_created.append(block.input["file_path"])
 
                     # Calculate iteration timing
                     iteration_end_time = time.perf_counter()
-                    iteration_duration = (
-                        iteration_end_time - iteration_start_time
-                    )
+                    iteration_duration = iteration_end_time - iteration_start_time
                     iteration_times.append(iteration_duration)
 
                     display_message(
@@ -348,6 +309,7 @@ class SwarmOrchestrator:
 
                         self._display_final_metrics(
                             iteration_count=iteration_count,
+                            turn_count=self.turn_count,
                             message_count=message_count,
                             start_time=start_time,
                             iteration_times=iteration_times,
@@ -361,10 +323,14 @@ class SwarmOrchestrator:
                         break
 
         except KeyboardInterrupt:
-            console.print("\n\n[yellow]Orchestration interrupted by user during orchestration[/yellow]")
+            console.print(
+                "\n\n[yellow]Orchestration interrupted by user during orchestration[/yellow]"
+            )
             await self._disconnect_from_claude("run_orchestration")
         except CLINotFoundError:
-            logger.error("Please install Claude Code: npm install -g @anthropic-ai/claude-code")
+            logger.error(
+                "Please install Claude Code: npm install -g @anthropic-ai/claude-code"
+            )
             raise
         except ProcessError as e:
             logger.error(f"Process failed with exit code: {e.exit_code}")
@@ -375,7 +341,7 @@ class SwarmOrchestrator:
         except Exception as e:
             logger.error(f"Orchestration failed: {e}", exc_info=True)
             display_message(f"\n[red]❌ Orchestration failed: {e}[/red]")
-            raise 
+            raise
 
     def _display_orchestrator_info(self):
         """Display information about the loaded configuration."""
@@ -417,9 +383,7 @@ class SwarmOrchestrator:
                 logger.info(
                     f"Loading main prompt from YAML config: {self.main_prompt_file}"
                 )
-                console.print(
-                    f"\n[dim]📄 Using prompt from: {prompt_path}[/dim]"
-                )
+                console.print(f"\n[dim]📄 Using prompt from: {prompt_path}[/dim]")
                 return load_markdown_for_prompt(str(prompt_path))
             else:
                 logger.warning(
@@ -454,6 +418,7 @@ class SwarmOrchestrator:
     def _display_final_metrics(
         self,
         iteration_count: int,
+        turn_count: int,
         message_count: int,
         start_time: float,
         iteration_times: list,
@@ -468,9 +433,7 @@ class SwarmOrchestrator:
         end_time = time.perf_counter()
         total_duration = end_time - start_time
         avg_iteration_time = (
-            sum(iteration_times) / len(iteration_times)
-            if iteration_times
-            else 0
+            sum(iteration_times) / len(iteration_times) if iteration_times else 0
         )
 
         display_message(
@@ -484,19 +447,23 @@ class SwarmOrchestrator:
 
         # Iteration metrics
         display_message("[bold white]Iteration Metrics:[/bold white]")
+        display_message(
+            f"   • SDK Turns (agentic loops): [bold]{turn_count}[/bold] "
+            f"(max_turns={self.options.max_turns if hasattr(self.options, 'max_turns') else 'unlimited'})"
+        )
         display_message(f"   • Total iterations: [bold]{iteration_count}[/bold]")
         display_message(f"   • Total messages: [bold]{message_count}[/bold]")
         display_message(
-            f"   • Average time/iteration: "
-            f"[bold]{avg_iteration_time:.3f}s[/bold]"
+            f"   • Messages per turn: [bold]{message_count/turn_count if turn_count > 0 else 0:.1f}[/bold]"
         )
         display_message(
-            f"   • Fastest iteration: "
-            f"[bold]{min(iteration_times):.3f}s[/bold]"
+            f"   • Average time/iteration: " f"[bold]{avg_iteration_time:.3f}s[/bold]"
         )
         display_message(
-            f"   • Slowest iteration: "
-            f"[bold]{max(iteration_times):.3f}s[/bold]"
+            f"   • Fastest iteration: " f"[bold]{min(iteration_times):.3f}s[/bold]"
+        )
+        display_message(
+            f"   • Slowest iteration: " f"[bold]{max(iteration_times):.3f}s[/bold]"
         )
 
         # Content metrics
@@ -509,17 +476,18 @@ class SwarmOrchestrator:
         # Cost metrics
         display_message("\n[bold white]Cost & Time Metrics:[/bold white]")
         if cost > 0:
-            display_message(
-                f"   • Total cost: [bold yellow]${cost:.6f}[/bold yellow]"
-            )
+            display_message(f"   • Total cost: [bold yellow]${cost:.6f}[/bold yellow]")
             if iteration_count > 1:
                 display_message(
                     f"   • Cost per iteration: "
                     f"[bold]${cost/iteration_count:.6f}[/bold]"
                 )
+            if turn_count > 0:
+                display_message(
+                    f"   • Cost per turn: [bold]${cost/turn_count:.6f}[/bold]"
+                )
         display_message(
-            f"   • Total duration: "
-            f"[bold green]{total_duration:.2f}s[/bold green]"
+            f"   • Total duration: " f"[bold green]{total_duration:.2f}s[/bold green]"
         )
 
         # Token usage
@@ -532,8 +500,7 @@ class SwarmOrchestrator:
                 display_message(f"   • Output tokens: {usage.output_tokens:,}")
             if hasattr(usage, "cache_read_input_tokens"):
                 display_message(
-                    f"   • Cache read tokens: "
-                    f"{usage.cache_read_input_tokens:,}"
+                    f"   • Cache read tokens: " f"{usage.cache_read_input_tokens:,}"
                 )
 
         # Files created
@@ -544,6 +511,12 @@ class SwarmOrchestrator:
 
         display_message(f"\n[bold cyan]{'─'*60}[/bold cyan]")
         display_message(f"[bold]📁 Output location:[/bold] {self.options.cwd}\n")
+        display_message(
+            f"\n[bold green]{'='*60}[/bold green]\n"
+            f"[bold green]⏱️  TOTAL TIME: {total_duration:.2f} seconds[/bold green]\n"
+            f"[bold green]🔄 SDK TURNS: {turn_count} | MESSAGES: {message_count}[/bold green]\n"
+            f"[bold green]{'='*60}[/bold green]\n"
+        )
 
 
 def list_available_configs(config_dir: Path) -> list[Path]:
@@ -572,9 +545,7 @@ def interactive_config_selection(config_dir: Path) -> Path:
 
     for i, config_path in enumerate(configs, 1):
         table.add_row(
-            str(i),
-            config_path.stem,
-            str(config_path.relative_to(Path.cwd()))
+            str(i), config_path.stem, str(config_path.relative_to(Path.cwd()))
         )
 
     console.print(table)
@@ -583,9 +554,9 @@ def interactive_config_selection(config_dir: Path) -> Path:
     # Get user selection
     while True:
         choice = Prompt.ask(
-            "[bold]Select configuration number (or 'exit' to quit)[/bold]",
-            default="1"
+            "[bold]Select configuration number (or 'exit' to quit)[/bold]", default="1"
         )
+        
 
         if choice.lower() == "exit":
             sys.exit(0)
@@ -596,8 +567,7 @@ def interactive_config_selection(config_dir: Path) -> Path:
                 return configs[idx]
             else:
                 console.print(
-                    f"[red]Invalid selection. Please choose "
-                    f"1-{len(configs)}[/red]"
+                    f"[red]Invalid selection. Please choose " f"1-{len(configs)}[/red]"
                 )
         except ValueError:
             console.print("[red]Invalid input. Please enter a number.[/red]")

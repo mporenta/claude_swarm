@@ -267,38 +267,79 @@ def display_message(msg, debug_mode: str = LOG_LEVEL, iteration: int = None, pri
         logger.error(f"Error displaying message: {e}", exc_info=True)
         print(f"Error displaying message: {e}")
 
-def file_path_creator(relative_dir: str) -> str:
+def file_path_creator(path_input: str) -> str:
     """
-    Generate a file path relative to the project root.
+    Resolve a file or directory path to an absolute path string.
+
+    Handles both absolute and relative paths. For relative paths, tries multiple
+    possible root locations to find the file/directory.
 
     Args:
-        relative_dir (str): Relative path to the markdown file (from project root).
+        path_input (str): Path to resolve (absolute or relative).
 
     Returns:
-        str: Full file path as a string.
+        str: Full absolute path as a string.
+
+    Raises:
+        FileNotFoundError: If the path cannot be found in any search location.
     """
     try:
+        # If already absolute and exists, return it
+        input_path = Path(path_input).expanduser()
+        if input_path.is_absolute():
+            if input_path.exists():
+                return str(input_path.resolve())
+            else:
+                raise FileNotFoundError(
+                    f"Absolute path does not exist: {input_path}\n"
+                    f"Please verify the path is correct."
+                )
 
-        # Find project root by walking upward until we find a known marker
+        # For relative paths, try multiple possible root locations
         def find_project_root(start: Path) -> Path:
+            """Find project root by looking for marker files."""
             markers = {"pyproject.toml", "requirements.txt", ".git", ".gitignore"}
             for parent in [start] + list(start.parents):
                 if any((parent / marker).exists() for marker in markers):
                     return parent
-            return start  # fallback to script directory if nothing found
+            return start
 
+        # Define search locations in priority order
         script_dir = Path(__file__).resolve().parent
-        project_root = find_project_root(script_dir)
-        dir = project_root / relative_dir
+        project_root = find_project_root(script_dir)  # /home/dev/claude_dev/claude_swarm
+        parent_root = project_root.parent  # /home/dev/claude_dev
+        current_dir = Path.cwd()
 
-        if not dir.exists():
-            raise FileNotFoundError(f"Directory not found: {dir}")
+        search_roots = [
+            current_dir,           # Current working directory
+            parent_root,           # Parent of project root (for sibling dirs like airflow/)
+            project_root,          # Project root itself
+            script_dir,            # Script directory
+        ]
 
-        return dir
+        # Try each search root
+        for root in search_roots:
+            candidate = root / path_input
+            if candidate.exists():
+                resolved = candidate.resolve()
+                logger.debug(f"Resolved '{path_input}' to '{resolved}' via root '{root}'")
+                return str(resolved)
+
+        # If not found anywhere, provide helpful error message
+        tried_paths = [str(root / path_input) for root in search_roots]
+        raise FileNotFoundError(
+            f"Could not find path: '{path_input}'\n"
+            f"Searched in the following locations:\n" +
+            "\n".join(f"  - {p}" for p in tried_paths) +
+            f"\n\nTip: Use absolute path (e.g., /home/dev/claude_dev/airflow/...) or "
+            f"verify the relative path is correct."
+        )
+
+    except FileNotFoundError:
+        raise  # Re-raise FileNotFoundError as-is
     except Exception as e:
-        print(f"Error finding directory {e}")
-        logger.error(f"Error finding directory: {e}", exc_info=True)
-        raise RuntimeError(f"Error Error finding directory {e}") from e
+        logger.error(f"Error resolving path '{path_input}': {e}", exc_info=True)
+        raise RuntimeError(f"Error resolving path '{path_input}': {e}") from e
 
 def load_markdown_for_prompt(relative_path: str) -> str:
     """

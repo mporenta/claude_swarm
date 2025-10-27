@@ -195,12 +195,16 @@ class ConversationSession:
         )
 
         # Metrics tracking
-        iteration_count = 0
+        # NOTE: message_count tracks individual messages in the response stream
+        # turn_count tracks SDK agentic loop turns (limited by max_turns in ClaudeAgentOptions)
+        # These are different: one turn can produce multiple messages (thinking, tool use, text, etc.)
+        message_count = 0  # Total messages received (excluding StreamEvents)
+        turn_count = 0  # Agentic loop cycles (AssistantMessage = Claude's turn response)
         tool_use_count = 0
         thinking_count = 0
         text_block_count = 0
         files_created = []
-        iteration_times = []
+        message_times = []  # Time per message
         iteration_costs = []
 
         async with self.client:
@@ -210,32 +214,36 @@ class ConversationSession:
 
             display_message(
                 f"[bold blue]{'='*60}[/bold blue]\n"
-                f"[bold yellow]🔄 Starting orchestration iterations...[/bold yellow]\n"
+                f"[bold yellow]🔄 Starting orchestration...[/bold yellow]\n"
                 f"[bold blue]{'='*60}[/bold blue]\n"
             )
-            message_count = 0
+            total_messages = 0  # Includes StreamEvents for display purposes
 
             async for message in self.client.receive_response():
-                message_count += 1
+                total_messages += 1
                 # Skip StreamEvent messages entirely - they are logged to file only
                 from claude_agent_sdk.types import StreamEvent
 
                 if isinstance(message, StreamEvent):
                     continue
 
-                iteration_count += 1
-                iteration_start_time = time.perf_counter()
+                message_count += 1
+                message_start_time = time.perf_counter()
 
-                # Display iteration header
+                # Track turn count (each AssistantMessage = one agentic loop turn)
+                if isinstance(message, AssistantMessage):
+                    turn_count += 1
+
+                # Display message header
                 display_message(
                     f"\n[bold magenta]{'─'*60}[/bold magenta]\n"
-                    f"[bold cyan]📍 ITERATION {iteration_count} | "
+                    f"[bold cyan]📍 MESSAGE {message_count} | Turn {turn_count} | "
                     f"Type: {message.__class__.__name__}[/bold cyan]\n"
                     f"[bold magenta]{'─'*60}[/bold magenta]"
                 )
 
                 # Display the message with debugging context
-                display_message(message, iteration=iteration_count)
+                display_message(message, iteration=message_count)
 
                 # Track message-specific metrics
                 if isinstance(message, AssistantMessage):
@@ -249,29 +257,26 @@ class ConversationSession:
                             if block.name == "Write" and "file_path" in block.input:
                                 files_created.append(block.input["file_path"])
 
-                # Calculate iteration metrics
-                iteration_end_time = time.perf_counter()
-                iteration_duration = iteration_end_time - iteration_start_time
-                iteration_times.append(iteration_duration)
+                # Calculate message processing time
+                message_end_time = time.perf_counter()
+                message_duration = message_end_time - message_start_time
+                message_times.append(message_duration)
 
-                # Display iteration metrics
+                # Display message metrics
                 display_message(
-                    f"[dim]⏱️  Iteration {iteration_count} took: {iteration_duration:.3f}s[/dim]"
+                    f"[dim]⏱️  Message {message_count} took: {message_duration:.3f}s[/dim]"
                 )
 
                 if isinstance(message, ResultMessage):
                     cost = float(message.total_cost_usd or 0)
                     iteration_costs.append(cost)
-                    display_message(
-                        f"   •🚀  Total messages: [bold]{message_count}[/bold]"
-                    )
 
                     # Calculate final metrics
                     end_time = time.perf_counter()
                     total_duration = end_time - start_time
-                    avg_iteration_time = (
-                        sum(iteration_times) / len(iteration_times)
-                        if iteration_times
+                    avg_message_time = (
+                        sum(message_times) / len(message_times)
+                        if message_times
                         else 0
                     )
 
@@ -285,18 +290,27 @@ class ConversationSession:
                         f"\n[bold yellow]📊 ORCHESTRATION METRICS:[/bold yellow]"
                     )
                     display_message(f"[bold cyan]{'─'*60}[/bold cyan]")
-                    display_message(f"[bold white]Iteration Metrics:[/bold white]")
+                    display_message(f"[bold white]Agentic Loop Metrics:[/bold white]")
                     display_message(
-                        f"   • Total iterations: [bold]{iteration_count}[/bold]"
+                        f"   • SDK Turns (agentic loops): [bold]{turn_count}[/bold] "
+                        f"(max_turns={self.options.max_turns if hasattr(self.options, 'max_turns') else 'unlimited'})"
                     )
                     display_message(
-                        f"   • Average time/iteration: [bold]{avg_iteration_time:.3f}s[/bold]"
+                        f"   • Total messages processed: [bold]{message_count}[/bold]"
                     )
                     display_message(
-                        f"   • Fastest iteration: [bold]{min(iteration_times):.3f}s[/bold]"
+                        f"   • Messages per turn: [bold]{message_count/turn_count if turn_count > 0 else 0:.1f}[/bold]"
+                    )
+
+                    display_message(f"\n[bold white]Message Processing Times:[/bold white]")
+                    display_message(
+                        f"   • Average time/message: [bold]{avg_message_time:.3f}s[/bold]"
                     )
                     display_message(
-                        f"   • Slowest iteration: [bold]{max(iteration_times):.3f}s[/bold]"
+                        f"   • Fastest message: [bold]{min(message_times):.3f}s[/bold]"
+                    )
+                    display_message(
+                        f"   • Slowest message: [bold]{max(message_times):.3f}s[/bold]"
                     )
 
                     display_message(f"\n[bold white]Content Metrics:[/bold white]")
@@ -310,9 +324,13 @@ class ConversationSession:
                         display_message(
                             f"   • Total cost: [bold yellow]${cost:.6f}[/bold yellow]"
                         )
-                        if iteration_count > 1:
+                        if turn_count > 0:
                             display_message(
-                                f"   • Cost per iteration: [bold]${cost/iteration_count:.6f}[/bold]"
+                                f"   • Cost per turn: [bold]${cost/turn_count:.6f}[/bold]"
+                            )
+                        if message_count > 0:
+                            display_message(
+                                f"   • Cost per message: [bold]${cost/message_count:.6f}[/bold]"
                             )
                     display_message(
                         f"   • Total duration: [bold green]{total_duration:.2f}s[/bold green]"
@@ -350,7 +368,7 @@ class ConversationSession:
                     display_message(
                         f"\n[bold green]{'='*60}[/bold green]\n"
                         f"[bold green]⏱️  TOTAL TIME: {total_duration:.2f} seconds[/bold green]\n"
-                        f"[bold green]🔄 ITERATIONS: {iteration_count}[/bold green]\n"
+                        f"[bold green]🔄 SDK TURNS: {turn_count} | MESSAGES: {message_count}[/bold green]\n"
                         f"[bold green]{'='*60}[/bold green]\n"
                     )
 
@@ -403,6 +421,7 @@ if __name__ == "__main__":
                 "preset": "claude_code",
                 "append": orchestrator_agent,
             },
+            #max_turns = 5,
         
             model=CLAUDE_MODEL,
             setting_sources=[

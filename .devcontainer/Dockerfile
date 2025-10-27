@@ -43,10 +43,10 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
   update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
 # Upgrade pip and install Python dependencies for development tooling
-COPY requirements.txt /tmp/dev-requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN python3.11 -m pip install --upgrade pip && \
-  python3.11 -m pip install --no-cache-dir -r /tmp/dev-requirements.txt && \
-  rm /tmp/dev-requirements.txt
+  python3.11 -m pip install --no-cache-dir -r /tmp/requirements.txt && \
+  rm /tmp/requirements.txt
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \

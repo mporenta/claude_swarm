@@ -1,0 +1,73 @@
+# Airflow Agent Options - Simplified with Frontmatter Subagents
+#
+# This configuration uses the Claude Code subagent protocol.
+# Agents are automatically discovered from .claude/agents/ directory.
+#
+# SETUP:
+# 1. Agents are defined in .claude/agents/*.md with YAML frontmatter
+# 2. This YAML only needs to specify orchestrator-level settings
+# 3. No need to define agents here - they're auto-discovered!
+
+system_prompt:
+  type: preset
+  preset: claude_code
+  append: "{ORCHESTRATOR_AGENT}"
+
+# Model for orchestrator (agents inherit or specify their own)
+model: "{CLAUDE_MODEL}"
+
+# Main prompt file for Airflow tasks
+main_prompt_file: airflow/airflow_v2_CLAUDE.md
+
+# Load project-level CLAUDE.md files
+setting_sources:
+  - project
+
+# Working directory for generated code
+cwd: "{output_dir}"
+
+# Add Airflow project directories to SDK's search path
+add_dirs:
+  - "{AIRFLOW_2_DAGS_DIR}"
+  - "{AIRFLOW_LEGACY_DAGS_DIR}"
+
+# Environment variables passed to orchestrator and agents
+env:
+  # Airflow configuration
+  AIRFLOW_HOME: "{AIRFLOW_HOME}"
+  AIRFLOW__CORE__DAGS_FOLDER: "{AIRFLOW_2_DAGS_DIR}"
+
+  # Python environment
+  PYTHONPATH: "{PYTHONPATH}"
+
+  # Project paths
+  PROJECT_ROOT: "{project_root}"
+  OUTPUT_DIR: "{output_dir}"
+  AIRFLOW_2_DAGS_DIR: "{AIRFLOW_2_DAGS_DIR}"
+  AIRFLOW_LEGACY_DAGS_DIR: "{AIRFLOW_LEGACY_DAGS_DIR}"
+  AIRFLOW_2_ROOT: "{AIRFLOW_2_ROOT}"
+  AIRFLOW_LEGACY_ROOT: "{AIRFLOW_LEGACY_ROOT}"
+
+# Global tools available to orchestrator
+# Agents specify their own tools in frontmatter
+allowed_tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
+
+# Auto-accept edits without prompting
+permission_mode: acceptEdits
+
+# Note: Agents are auto-discovered from .claude/agents/
+# - migration-specialist.md
+# - dag-developer.md
+# - airflow-code-reviewer.md
+#
+# Each agent defines its own:
+# - name, description, tools, model in YAML frontmatter
+# - system prompt in markdown body
+#
+# Agents will be available as: @migration-specialist, @dag-developer, @airflow-code-reviewer

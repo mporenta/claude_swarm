@@ -12,14 +12,15 @@
 system_prompt:
   type: preset
   preset: claude_code
-  append: "{orchestrator_agent}"
+  append: "{ORCHESTRATOR_AGENT}"
+
 
 # Model to use - can be overridden by CLAUDE_MODEL env var
 model: "{CLAUDE_MODEL}"
 
 # Main prompt file for Airflow migration tasks
 # This file should be in the claude_swarm repo (stable location)
-main_prompt_file: prompts/airflow_prompts/main-query-airflow.md
+main_prompt_file: airflow/airflow_v2_CLAUDE.md
 
 # Load project-level CLAUDE.md files if present
 setting_sources:

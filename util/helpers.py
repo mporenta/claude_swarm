@@ -267,6 +267,38 @@ def display_message(msg, debug_mode: str = LOG_LEVEL, iteration: int = None, pri
         logger.error(f"Error displaying message: {e}", exc_info=True)
         print(f"Error displaying message: {e}")
 
+def file_path_creator(relative_dir: str) -> str:
+    """
+    Generate a file path relative to the project root.
+
+    Args:
+        relative_dir (str): Relative path to the markdown file (from project root).
+
+    Returns:
+        str: Full file path as a string.
+    """
+    try:
+
+        # Find project root by walking upward until we find a known marker
+        def find_project_root(start: Path) -> Path:
+            markers = {"pyproject.toml", "requirements.txt", ".git", ".gitignore"}
+            for parent in [start] + list(start.parents):
+                if any((parent / marker).exists() for marker in markers):
+                    return parent
+            return start  # fallback to script directory if nothing found
+
+        script_dir = Path(__file__).resolve().parent
+        project_root = find_project_root(script_dir)
+        dir = project_root / relative_dir
+
+        if not dir.exists():
+            raise FileNotFoundError(f"Directory not found: {dir}")
+
+        return dir
+    except Exception as e:
+        print(f"Error finding directory {e}")
+        logger.error(f"Error finding directory: {e}", exc_info=True)
+        raise RuntimeError(f"Error Error finding directory {e}") from e
 
 def load_markdown_for_prompt(relative_path: str) -> str:
     """

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Mapping
+import shutil
 
 import yaml
 
@@ -41,13 +42,40 @@ def load_agent_options_from_yaml(
         with config_file.open("r", encoding="utf-8") as fh:
             raw_config: dict[str, Any] = yaml.safe_load(fh) or {}
 
-        formatted_config = _apply_context(raw_config, context or {})
+        # Prepare context with ORCHESTRATOR_AGENT loaded from main_prompt_file
+        enhanced_context = dict(context or {})
+        
+        # Handle main_prompt_file if specified
+        if "main_prompt_file" in raw_config:
+            main_prompt_path = raw_config["main_prompt_file"]
+            
+            # Apply existing context to resolve path placeholders
+            main_prompt_path = _apply_context(main_prompt_path, enhanced_context)
+            
+            # Load the orchestrator prompt content
+            orchestrator_content = load_markdown_for_prompt(main_prompt_path)
+            enhanced_context["ORCHESTRATOR_AGENT"] = orchestrator_content
+            
+            # Optionally copy to CLAUDE.md in project root
+            if "project_root" in enhanced_context:
+                project_root = Path(enhanced_context["project_root"])
+                claude_md_path = project_root / "CLAUDE.md"
+                
+                # Copy the main prompt file to CLAUDE.md
+                source_path = Path(main_prompt_path)
+                if source_path.exists():
+                    logger.info(f"Copying {source_path} to {claude_md_path}")
+                    shutil.copy2(source_path, claude_md_path)
+                else:
+                    logger.warning(f"Main prompt file not found: {source_path}")
+
+        formatted_config = _apply_context(raw_config, enhanced_context)
 
         agent_definitions = _build_agent_definitions(formatted_config.pop("agents", {}))
 
         option_keys = {
             "system_prompt",
-            "continue_conversation",
+            "model",
             "setting_sources",
             "cwd",
             "add_dirs",

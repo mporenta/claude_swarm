@@ -16,7 +16,6 @@ from typing import Optional
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
-
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -24,12 +23,16 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
-    ThinkingBlock
+    ThinkingBlock,
+    CLINotFoundError,
+    ProcessError,
+    CLIJSONDecodeError
 )
 
 from src.config_loader import load_agent_options_from_yaml
-from util.helpers import load_markdown_for_prompt, display_message
+from util.helpers import load_markdown_for_prompt, display_message, debug_log
 from util.log_set import logger
+from util.agent_loader import discover_agents
 
 console = Console()
 
@@ -106,7 +109,7 @@ class SwarmOrchestrator:
         # Airflow 2.0 paths (check env vars first)
         airflow_2_root = Path(os.getenv(
             "AIRFLOW_2_ROOT",
-            project_root / "airflow" / "data-airflow-2"
+            project_root / "airflow" / "data-airflow"
         ))
         airflow_2_dags_dir = Path(os.getenv(
             "AIRFLOW_2_DAGS_DIR",
@@ -209,6 +212,22 @@ class SwarmOrchestrator:
                 context=self.context
             )
             logger.debug(f"Loaded agent options from YAML: {self.options}")
+
+            # Discover and merge frontmatter agents from .claude/agents/
+            project_root = Path(__file__).resolve().parent.parent
+            frontmatter_agents = discover_agents(project_root)
+
+            if frontmatter_agents:
+                logger.info(f"Discovered {len(frontmatter_agents)} frontmatter agent(s) from .claude/agents/")
+
+                # Merge frontmatter agents with YAML agents
+                # Frontmatter agents have lower priority than YAML config
+                for agent_name, agent_def in frontmatter_agents.items():
+                    if agent_name not in self.options.agents:
+                        self.options.agents[agent_name] = agent_def
+                        logger.info(f"Added frontmatter agent: {agent_name}")
+                    else:
+                        logger.debug(f"Skipped frontmatter agent '{agent_name}' (overridden by YAML config)")
 
             logger.debug(
                 f"Successfully loaded configuration from: "
@@ -344,9 +363,18 @@ class SwarmOrchestrator:
         except KeyboardInterrupt:
             console.print("\n\n[yellow]Orchestration interrupted by user during orchestration[/yellow]")
             await self._disconnect_from_claude("run_orchestration")
+        except CLINotFoundError:
+            logger.error("Please install Claude Code: npm install -g @anthropic-ai/claude-code")
+            raise
+        except ProcessError as e:
+            logger.error(f"Process failed with exit code: {e.exit_code}")
+            raise
+        except CLIJSONDecodeError as e:
+            logger.error(f"Failed to parse response: {e}")
+            raise
         except Exception as e:
             logger.error(f"Orchestration failed: {e}", exc_info=True)
-            console.print(f"\n[red]❌ Orchestration failed: {e}[/red]")
+            display_message(f"\n[red]❌ Orchestration failed: {e}[/red]")
             raise 
 
     def _display_orchestrator_info(self):

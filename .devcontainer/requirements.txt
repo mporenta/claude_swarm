@@ -1,0 +1,19 @@
+# Core Dependencies
+claude-agent-sdk>=0.1.0   # Multi-agent orchestration framework
+
+# Terminal and Display
+rich>=13.0.0              # Terminal formatting and output
+
+# Logging
+loguru>=0.7.0             # Advanced logging with rotation
+
+# Configuration
+python-dotenv>=1.0.0      # Environment variable management
+PyYAML>=6.0               # YAML configuration parsing
+
+# Timezone Support
+pytz>=2023.0              # Timezone conversions
+tzlocal>=5.0.0            # Local timezone detection
+
+# Async Support
+anyio>=4.0.0              # Async I/O compatibility layer

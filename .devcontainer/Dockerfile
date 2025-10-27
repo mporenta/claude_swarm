@@ -4,92 +4,62 @@ ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
-
-# Install basic development tools and iptables/ipset
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  ca-certificates \
-  curl \
-  build-essential \
-  less \
-  git \
-  procps \
-  sudo \
-  fzf \
-  zsh \
-  man-db \
-  unzip \
-  gnupg2 \
-  gh \
-  iptables \
-  ipset \
-  iproute2 \
-  dnsutils \
-  aggregate \
-  jq \
-  nano \
-  vim \
-  python3.11 \
-  python3.11-dev \
-  python3.11-venv \
-  python3-pip \
-  python3-setuptools \
-  python3-wheel \
-  python3-venv \
-  python3-dev \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Ensure python commands point to Python 3.11
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-  update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# Upgrade pip and install Python dependencies for development tooling
-COPY requirements.txt /tmp/requirements.txt
-RUN python3.11 -m pip install --upgrade pip && \
-  python3.11 -m pip install --no-cache-dir -r /tmp/requirements.txt && \
-  rm /tmp/requirements.txt
-
-# Ensure default node user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
-
+ARG GIT_DELTA_VERSION=0.18.2
 ARG USERNAME=node
 
-# Persist bash history.
-RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-  && mkdir /commandhistory \
-  && touch /commandhistory/.bash_history \
-  && chown -R $USERNAME /commandhistory
+# Base packages incl. Python 3.11 and venv support
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates curl build-essential less git procps sudo fzf zsh man-db unzip gnupg2 \
+  iptables ipset iproute2 dnsutils aggregate jq nano vim \
+  python3.11 python3.11-dev python3.11-venv python3-pip python3-setuptools python3-wheel python3-dev \
+  && rm -rf /var/lib/apt/lists/*
 
-# Set `DEVCONTAINER` environment variable to help with orientation
+# Optional: make python/python3 point to 3.11 (not strictly needed once venv is used)
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Create and prime a global venv for the image
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+RUN python3.11 -m venv "$VIRTUAL_ENV" && \
+    "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip
+
+# Install Python deps into the venv (avoids PEP 668)
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# Git delta (no sudo needed in a Docker build)
+RUN ARCH="$(dpkg --print-architecture)" && \
+    wget -q "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+    dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+    rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# Create workspace and config; persist bash/zsh history
+RUN mkdir -p /workspace /home/node/.claude /commandhistory /usr/local/share/npm-global && \
+    touch /commandhistory/.bash_history && \
+    chown -R ${USERNAME}:${USERNAME} /workspace /home/node/.claude /commandhistory /usr/local/share/npm-global
+
+# Give node permission to run firewall init as root (if you need it later)
+COPY init-firewall.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-firewall.sh && \
+    printf "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh\n" > /etc/sudoers.d/node-firewall && \
+    chmod 0440 /etc/sudoers.d/node-firewall
+
+# Environment for devcontainers / shells
 ENV DEVCONTAINER=true
-
-# Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude && \
-  chown -R node:node /workspace /home/node/.claude
-
-WORKDIR /workspace
-
-ARG GIT_DELTA_VERSION=0.18.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
-
-# Set up non-root user
-USER node
-
-# Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin
-
-# Set the default shell to zsh rather than sh
+ENV PATH="$PATH:/usr/local/share/npm-global/bin"
 ENV SHELL=/bin/zsh
-
-# Set the default editor and visual
 ENV EDITOR=nano
 ENV VISUAL=nano
 
-# Default powerline10k theme
+WORKDIR /workspace
+
+# Switch to non-root user for global npm installs and shell setup
+USER node
+
+# zsh setup
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
   -p git \
@@ -99,14 +69,8 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   -x
 
-# Install Claude
+# Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-
-# Copy and set up firewall script
-COPY init-firewall.sh /usr/local/bin/
-USER root
-RUN chmod +x /usr/local/bin/init-firewall.sh && \
-  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-  chmod 0440 /etc/sudoers.d/node-firewall
+# Default back to node user with venv-first PATH
 USER node

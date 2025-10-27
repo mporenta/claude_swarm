@@ -7,6 +7,9 @@ ARG CLAUDE_CODE_VERSION=latest
 
 # Install basic development tools and iptables/ipset
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  build-essential \
   less \
   git \
   procps \
@@ -25,7 +28,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  python3.11 \
+  python3.11-dev \
+  python3.11-venv \
+  python3-pip \
+  python3-setuptools \
+  python3-wheel \
+  python3-venv \
+  python3-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Ensure python commands point to Python 3.11
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+  update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip and install Python dependencies for development tooling
+COPY requirements.txt /tmp/dev-requirements.txt
+RUN python3.11 -m pip install --upgrade pip && \
+  python3.11 -m pip install --no-cache-dir -r /tmp/dev-requirements.txt && \
+  rm /tmp/dev-requirements.txt
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \

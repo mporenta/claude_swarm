@@ -25,7 +25,7 @@ def dag_mirgration_agent() -> ClaudeAgentOptions:
                 "preset": "claude_code",
                 "append": 'CRITICAL: Execute `/check-common-components` skill BEFORE recommending any custom operators, hooks, or utilities.',
             },
-            max_turns=25,
+            max_turns=15,  # Orchestrator only - subagents have their own iteration limits in prompts
             model="sonnet",
             setting_sources=["project"],
             cwd="/home/dev/claude_dev",
@@ -38,6 +38,14 @@ def dag_mirgration_agent() -> ClaudeAgentOptions:
                     prompt="""You are an Apache Airflow migration expert specializing in code transformation.
 
         🔧 MANDATORY: Execute `check-common-components` found in the skills: `/home/dev/claude_dev/claude_swarm/.claude/skills/check-common-components.md` skill BEFORE writing ANY custom operators, hooks, or utilities. Report findings before implementation.
+
+        ⚠️ ITERATION LIMIT: You have a MAXIMUM of 8 tool-use iterations to complete your task. Plan your work efficiently:
+        - Iterations 1-2: Analysis (read legacy DAG, identify components needed)
+        - Iteration 3: Check existing components (run /check-common-components or search common/)
+        - Iterations 4-6: Implementation (write migrated DAG, documentation)
+        - Iterations 7-8: Final verification and handoff
+
+        If you cannot complete the task within 8 iterations, stop and report what you've accomplished and what remains.
 
         Your focus areas:
         1. **Check for existing components**: ALWAYS run `/check-common-components` when you need operators, hooks, or utilities
@@ -81,6 +89,14 @@ def dag_migration_user_prompt(legacy_py_file: str, new_dag_path: str):
 ## Task Overview
 I need you to do the migration using subagents used in a successfully migrated DAG by comparing the legacy and modern versions.
 
+⚠️ EFFICIENCY REQUIREMENTS:
+- You (orchestrator) have a maximum of 15 conversation turns
+- Each subagent has iteration limits defined in their prompts:
+  * @migration-specialist: 8 iterations max
+  * @airflow-code-reviewer: 5 iterations max
+- Delegate work efficiently and avoid unnecessary back-and-forth
+- Consolidate analysis and provide complete context when delegating
+
 ## 🔧 CRITICAL REQUIREMENT
 Before any subagent writes custom operators, hooks, or utilities, they MUST execute the `/check-common-components` skill to search for existing reusable components in `./data-airflow/dags/common/`. This is NON-NEGOTIABLE.
 
@@ -100,7 +116,11 @@ Before any subagent writes custom operators, hooks, or utilities, they MUST exec
 - Ensure all agents use `/check-common-components` before creating custom code.
 - You must **END THE PROJECT** by getting a seal of approval from @airflow-code-reviewer.
 
-
+## Delegation Best Practices
+- Provide complete context to subagents in your delegation prompts (don't make them re-read files unnecessarily)
+- Include analysis results, component inventory, and specific instructions
+- Request comprehensive deliverables to minimize iteration rounds
+- Only delegate when subagent expertise is truly needed
 
 Treat every migration as an opportunity to eliminate legacy anti-patterns, improve reliability, and document the new operating model.
 """

@@ -17,16 +17,41 @@ Migrate from operator-based patterns to TaskFlow API (`@dag`/`@task` decorators)
 
 **NEVER create custom operators, hooks, or utilities at the DAG level when they exist in `/common/`.**
 
-**🔧 USE THE SKILL**: Before writing ANY custom code, execute the `check-common-components` skill:
-```
-/check-common-components
+**🔧 USE THE SKILLS**: 13 specialized migration skills enforce DRY and guide systematic migration:
+
+### Phase 1: Pre-Migration Analysis (ALWAYS RUN FIRST)
+```bash
+/validate-migration-readiness  # Pre-flight checklist - assess blockers
+/analyze-legacy-dag            # Parse and document legacy structure
+/check-common-components       # ⭐ CRITICAL - MUST run before ANY custom code
+/find-anti-patterns            # Detect DRY violations and security issues
 ```
 
-This skill will:
-1. Search `/home/dev/claude_dev/airflow/data-airflow/dags/common/` for existing implementations
-2. Review available operators, hooks, and callbacks
-3. Provide a decision matrix: USE | EXTEND | CREATE
-4. Generate a report documenting your research
+### Phase 2: Migration Planning (RUN BEFORE CODING)
+```bash
+/map-operators-to-common       # Match legacy operators to existing components
+/extract-business-logic        # Plan where code should live (common/src/@task)
+/suggest-template-choice       # Choose TaskFlow vs Traditional template
+/analyze-connection-usage      # Document connections and map to hooks
+```
+
+### Phase 3: Implementation Details (AS NEEDED)
+```bash
+/compare-dag-configs           # Map default_args to @dag parameters
+/check-xcom-patterns          # Convert manual XCom to TaskFlow patterns
+/identify-dependencies        # Convert task dependencies
+/check-dynamic-tasks          # Convert loops to .override() patterns
+```
+
+### Phase 4: Validation (POST-MIGRATION)
+```bash
+/generate-migration-diff      # Document improvements and LOC reduction
+```
+
+**All skills are located in**: `.claude/skills/` (auto-discovered)
+**Complete documentation**: `.claude/skills/README.md`
+
+**CRITICAL**: `/check-common-components` searches `common/` for existing implementations and provides a decision matrix: USE | EXTEND | CREATE
 
 ### Available Common Components
 
@@ -137,6 +162,84 @@ Duplicating existing code creates:
 - **Code Review Waste**: Reviewing already-solved problems
 
 **Rule**: If it exists in `common/`, USE IT. Period.
+
+---
+
+## 📚 Skills Workflow Documentation
+
+### Skill Execution Order (Recommended)
+
+**For EVERY Migration:**
+1. Start with **`/validate-migration-readiness`** - Checks if ready, assesses complexity
+2. Run **`/analyze-legacy-dag`** - Detailed structure analysis with line numbers
+3. **MANDATORY**: **`/check-common-components`** ⭐ - Prevent code duplication
+4. Run **`/find-anti-patterns`** - Identify issues to fix
+
+**Before Implementation:**
+5. **`/map-operators-to-common`** - Which operators to use from common/
+6. **`/extract-business-logic`** - Where each function should live
+7. **`/suggest-template-choice`** - TaskFlow vs Traditional decision
+8. **`/analyze-connection-usage`** - Connection requirements
+
+**During Implementation (as needed):**
+9. **`/compare-dag-configs`** - Parameter migration map
+10. **`/check-xcom-patterns`** - XCom conversion patterns
+11. **`/identify-dependencies`** - Dependency conversion guide
+12. **`/check-dynamic-tasks`** - Loop conversion patterns
+
+**After Implementation:**
+13. **`/generate-migration-diff`** - Value demonstration report
+
+### Skill Benefits
+
+**Expected Results Per Migration:**
+- **40-70% LOC reduction** through code reuse
+- **Eliminate 100-200+ lines** of redundant code
+- **Modular structure**: 1 file → 3 files (main.py, src/main.py, src/config.py)
+- **Type safety**: 0% → 100% (all @task functions have type hints)
+- **XCom operations**: Manual → Automatic (TaskFlow)
+- **DRY compliance**: 100% (no duplicated code from common/)
+
+**Real Example (cresta_to_snowflake):**
+- Legacy: 425 lines (1 file)
+- Modern: 155 lines (3 files)
+- **Reduction: 63.5%**
+- Eliminated: 150 lines of custom SFTP code
+- Replaced with: 9-line operator configuration
+
+### Quick Reference by Use Case
+
+**"I'm starting a migration":**
+```bash
+/validate-migration-readiness
+/analyze-legacy-dag
+/check-common-components  # ⭐ CRITICAL
+/find-anti-patterns
+```
+
+**"I need SFTP/S3/API logic":**
+```bash
+/check-common-components  # ⭐ RUN THIS FIRST
+/map-operators-to-common
+/analyze-connection-usage
+```
+
+**"I'm converting PythonOperators":**
+```bash
+/extract-business-logic
+/check-xcom-patterns
+/compare-dag-configs
+```
+
+**"I have loops creating tasks":**
+```bash
+/check-dynamic-tasks
+```
+
+**"I'm done migrating":**
+```bash
+/generate-migration-diff
+```
 
 ---
 

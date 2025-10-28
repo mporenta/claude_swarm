@@ -28,30 +28,35 @@ import sys
 import time
 from pathlib import Path
 
-print(f"sys.path before modification: {sys.path}")
-CLAUDE_LOG_LEVEL = os.getenv("CLAUDE_LOG_LEVEL", "INFO")
-joy = os.getenv("JOY")
-print(f"CLAUDE_LOG_LEVEL: {CLAUDE_LOG_LEVEL} and joy? {joy}")
+
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
-    AgentDefinition,
+    HookMatcher,
     AssistantMessage,
     ResultMessage,
     TextBlock,
     ToolUseBlock,
     ThinkingBlock,
 )
+
 from src.agent_options import dag_mirgration_agent, dag_migration_user_prompt
 from util.helpers import (
     load_markdown_for_prompt,
     display_message,
     file_path_creator,
-    workspace_root,
-    project_root,
+    safe_msg,
 )
 from util.log_set import log_config, logger
+from rich import print  # noqa: E402
+from rich.console import Console  # noqa: E402
 
+
+console = Console()
+display_message(f"sys.path before modification: {sys.path}")
+CLAUDE_LOG_LEVEL = os.getenv("CLAUDE_LOG_LEVEL", "INFO")
+joy = os.getenv("JOY")
+display_message(f"CLAUDE_LOG_LEVEL: {CLAUDE_LOG_LEVEL} and joy? {joy}")
 # Print deprecation warning
 display_message("\n[yellow]⚠️  DEPRECATION WARNING:[/yellow]")
 display_message("[yellow]This script (airflow_agent_main.py) is deprecated.[/yellow]")
@@ -70,62 +75,180 @@ class ConversationSession:
     ):
         self.options: ClaudeAgentOptions = None
         self.client = ClaudeSDKClient(self.options)
+        self._interactive_client = None
         self.user_prompt: str = ""
         self.turn_count = 0
         self.project_dir = project_dir
         self.should_exit = False
         self.legacy_dag_path = None
+        print(f"Initialized ConversationSession with project_dir: {self.project_dir}")
 
-    async def start(self):
+    async def validate_bash_command(self, input_data, tool_use_id, context):
+        """Block dangerous bash commands before execution."""
+        if input_data["tool_name"] != "Bash":
+            return {}
+
+        command = input_data["tool_input"].get("command", "")
+        dangerous_patterns = [
+            "rm -rf",
+            "dd if=",
+            "mkfs",
+            "> /dev/",
+            "chmod 777",
+            "curl | bash",
+            "wget | sh",
+        ]
+
+        for pattern in dangerous_patterns:
+            if pattern in command:
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": f"Blocked dangerous pattern: {pattern}",
+                    }
+                }
+        return {}
+
+    async def start(self, message: str = None):
         """Start the conversation session with proper interrupt handling."""
         try:
+            logger.info(f"Starting ConversationSession... in {self.project_dir}")
+            # Initialize with your specified options
+            self.options = ClaudeAgentOptions(
+                system_prompt={
+                    "type": "preset",
+                    "preset": "claude_code",
+                },
+                max_turns=15,
+                model="sonnet",
+                setting_sources=["project"],
+                cwd=self.project_dir,
+                add_dirs=["/Users/mike.porenta/python_dev/aptive_github"],
+                # Skills should auto-discover from {cwd}/.claude/skills/
+                permission_mode="acceptEdits",
+                allowed_tools=[
+                    "Skill",
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "Bash",
+                    "Grep",
+                    "Glob",
+                ],
+            )
 
             display_message(
                 "Starting Airflow agent session. Claude will remember context."
             )
+            display_message(f"[dim]Working directory (cwd): {self.project_dir}[/dim]")
             display_message(
-                "Commands: 'exit' to quit, 'interrupt' to stop current task, 'new' for new session"
+                f"[dim]Skills should be in: {self.project_dir}/.claude/skills/[/dim]"
             )
 
-            display_message("What would you like to do?\n")
-            display_message("  1. 🆕 Start a new Apache Airflow DAG project")
-            display_message("  2. 📦 Start a legacy DAG migration")
+            # If message provided, use non-interactive mode
+            if message:
+                display_message(f"\n🧑 You: {message}")
+                display_message("\n🤖 Claude Agent:")
+                try:
+                    # Create a new client instance with options for this session
+                    client = ClaudeSDKClient(self.options)
+                    async with client:
+                        await client.query(message)
+                        self.turn_count += 1
 
-            while True:
-                await asyncio.sleep(1)  # Allow event loop to process other tasks
-                user_input = input(f"\n[Turn {self.turn_count + 1}] You: ")
+                        # Process response
+                        display_message(f"\n[Turn {self.turn_count}]")
+                        async for msg in client.receive_response():
+                            display_message(f"1 boof Received message: {safe_msg(msg)}")
+                            # Only display AssistantMessage content (the actual response)
+                            if isinstance(msg, AssistantMessage):
+                                for block in msg.content:
+                                    if isinstance(block, TextBlock):
+                                        display_message(f"\n{block.text}\n")
+                                    elif isinstance(block, ThinkingBlock):
+                                        display_message(
+                                            f"\n[dim]💭 Thinking: {block.thinking}[/dim]\n"
+                                        )
+                                    elif isinstance(block, ToolUseBlock):
+                                        display_message(
+                                            f"\n[cyan]🔧 Using tool: {block.name}[/cyan]"
+                                        )
+                            elif hasattr(msg, "subtype") and msg.subtype == "success":
+                                display_message(
+                                    f"\n✅ Done! (Cost: ${msg.total_cost_usd:.6f})"
+                                )
 
-                if user_input.lower() == "exit":
-                    break
-                elif user_input.lower() == "interrupt":
-                    await self.client.interrupt()
-                    display_message("Task interrupted!")
-                    continue
-                elif user_input.lower() == "1":
-                    await self.new_dag_flow_start()
-                elif user_input.lower() == "2":
-                    await self.migrate_dag_flow_start()
-                elif user_input.lower() == "new":
-                    # Disconnect and reconnect for a fresh session
-                    await self.client.disconnect()
-                    await self.client.connect()
-                    self.turn_count = 0
-                    display_message(
-                        "Started new conversation session (previous context cleared)"
-                    )
-                    continue
-                else:
-                    # Send regular message - Claude remembers all previous messages in this session
+                        display_message("")  # New line after response
+
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
+                    display_message(f"\nError: {e}")
+                    raise
+            else:
+                # Interactive mode
+                display_message(
+                    "Commands: 'exit' to quit, 'interrupt' to stop current task, 'new' for new session"
+                )
+
+                while True:
+
                     try:
-                        await self.client(options=ClaudeAgentOptions()).query(
-                            user_input
+                        user_input = input("\n🧑 You: ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        display_message("\n\nGoodbye!")
+                        break
+
+                    if not user_input:
+                        continue
+
+                    # Handle special commands
+                    if user_input.lower() in ["exit", "quit"]:
+                        display_message("\nGoodbye!")
+                        break
+
+                    if user_input.lower() == "clear":
+                        display_message("\n✨ Conversation cleared. Starting fresh!\n")
+                        display_message(
+                            "   (Restart the script for a completely fresh session)"
                         )
+                        continue
+
+                    display_message("\n🤖 Claude:")
+                    try:
+                        # Create a new client instance with options for this session
+                        if (
+                            not hasattr(self, "_interactive_client")
+                            or self._interactive_client is None
+                        ):
+                            print(
+                                f"Creating new interactive ClaudeSDKClient...The options are {self.options} and the cwd is {self.project_dir}"
+                            )
+                            self._interactive_client = ClaudeSDKClient(self.options)
+                            await self._interactive_client.__aenter__()
+
+                        await self._interactive_client.query(user_input)
                         self.turn_count += 1
 
                         # Process response
                         display_message(f"[Turn {self.turn_count}] Claude:")
-                        async for message in self.client.receive_response():
-                            display_message(message)
+                        async for (
+                            message
+                        ) in self._interactive_client.receive_response():
+                            if isinstance(message, AssistantMessage):
+                                for block in message.content:
+                                    if isinstance(block, TextBlock):
+                                        print(block.text, end="", flush=True)
+                                        display_message(safe_msg(block.text))
+                                    elif isinstance(block, ToolUseBlock):
+                                        # Show when tools are being used
+                                        print(
+                                            f"\n🔧 [Using tool: {block.name}]",
+                                            flush=True,
+                                        )
+                                        display_message(safe_msg(block.name))
+
+                            print()  # New line after response
 
                         display_message("")  # New line after response
 
@@ -152,187 +275,17 @@ class ConversationSession:
         finally:
             # Always attempt cleanup
             try:
-                await self.client.disconnect()
+                if (
+                    hasattr(self, "_interactive_client")
+                    and self._interactive_client is not None
+                ):
+                    await self._interactive_client.__aexit__(None, None, None)
+                else:
+                    await self.client.disconnect()
             except Exception as e:
                 logger.error(f"Error during disconnect: {e}")
 
             display_message(f"\nConversation ended after {self.turn_count} turns.")
-
-    async def new_dag_flow_start(self):
-        """
-        Start of flow to invoke the DAG Orchestrator for greenfield DAG creation.
-        Collects requirements following the Intake & Clarify phase from orchestrator workflow.
-        """
-        project_path = Path(self.project_dir)
-        project_path.mkdir(parents=True, exist_ok=True)
-        display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
-
-        display_message(
-            "[bold cyan]🆕 New Airflow DAG Creation - Requirements Gathering[/bold cyan]\n"
-        )
-        display_message("[dim]Please provide the following information:[/dim]\n")
-
-        # Collect requirements following orchestrator's Intake & Clarify phase
-        dag_name = input("DAG/Pipeline Name (e.g., 'salesforce_daily'): ").strip()
-
-        display_message("\n[bold]Business Objective & Data Flow:[/bold]")
-        business_objective = input(
-            "Business objective (what problem does this solve?): "
-        ).strip()
-        data_source = input(
-            "Data source(s) (e.g., 'Enterprise SaaS API', 'dbt', '3rd Party REST API'): "
-        ).strip()
-        data_destination = input(
-            "Data destination (e.g., 'S3 → Snowflake external tables', 'S3 → raw tables', SaaS application): "
-        ).strip()
-
-        display_message("\n[bold]Scheduling & Environment:[/bold]")
-        schedule_cadence = input(
-            "Schedule cadence (e.g., 'daily 1am', 'hourly', '@daily', 'None' for manual): "
-        ).strip()
-        environment = (
-            input("Target environment (local/staging/prod) [default: local]: ").strip()
-            or "local"
-        )
-
-        display_message("\n[bold]Requirements & Constraints:[/bold]")
-        downstream_consumers = (
-            input(
-                "Downstream consumers (e.g., 'DBT models', 'BI dashboards', 'None') [optional]: "
-            ).strip()
-            or "None specified"
-        )
-        special_requirements = (
-            input(
-                "Special requirements (e.g., 'rate limiting', 'batching', 'large datasets') [optional]: "
-            ).strip()
-            or "Standard patterns"
-        )
-        sla_requirements = (
-            input(
-                "SLA requirements (e.g., 'Complete within 2 hours', 'None') [optional]: "
-            ).strip()
-            or "None specified"
-        )
-
-        # Build structured request following orchestrator expectations
-        new_dag_request = f"""
-Create a new Apache Airflow 2 DAG from scratch (greenfield development).
-
-## Project Requirements
-
-**Pipeline Name:** `{dag_name}`
-
-**Business Objective:**
-{business_objective}
-
-**Data Flow:**
-- **Source:** {data_source}
-- **Destination:** {data_destination}
-- **Downstream Consumers:** {downstream_consumers}
-
-**Scheduling & Environment:**
-- **Schedule:** {schedule_cadence}
-- **Target Environment:** {environment}
-- **SLA:** {sla_requirements}
-
-**Special Requirements:**
-{special_requirements}
-
-## Implementation Guidance
-
-Follow the standards in `airflow/airflow_CLAUDE.md`:
-1. Use the standardized directory structure: `dags/{dag_name}/src/main.py`
-2. Consider using `_dag_template/` or `_dag_taskflow_template/` as starting point
-3. Implement heartbeat-safe code (no I/O at module scope)
-4. Apply environment-aware configuration using `Variable.get("environment", default_var="local")`
-5. Use appropriate hooks/operators from `common/` when available
-6. Include proper type hints, docstrings, error handling, and logging
-7. Implement batching for large datasets (default 250,000 records)
-8. Follow the data pipeline pattern: Airflow fetches → S3, DBT handles normalization
-
-## Orchestration Flow
-
-Please follow your standard operating loop:
-1. **Intake & Clarify:** Review requirements above, identify any gaps or assumptions
-2. **Plan & Decompose:** Design directory structure, module boundaries, validation strategy
-3. **Delegate Work:** Assign to @dag-developer for implementation
-4. **Integrate & Iterate:** Review output, request revisions if needed
-5. **Validate & Close:** Engage @code-reviewer for final quality gate
-
-Ensure the final deliverable is production-ready and passes all quality gates.
-"""
-
-        # Display summary
-        display_message("\n" + "=" * 60)
-        display_message(
-            "[bold cyan]🚀 Starting New Airflow DAG Creation Orchestrator[/bold cyan]\n"
-        )
-        display_message(f"[bold]Pipeline Name:[/bold] {dag_name}")
-        display_message(f"[bold]Objective:[/bold] {business_objective}")
-        display_message(f"[bold]Data Source:[/bold] {data_source}")
-        display_message(f"[bold]Data Destination:[/bold] {data_destination}")
-        display_message(f"[bold]Schedule:[/bold] {schedule_cadence}")
-        display_message(f"[bold]Environment:[/bold] {environment}")
-        display_message(f"[bold]SLA:[/bold] {sla_requirements}")
-        display_message("=" * 60 + "\n")
-
-        # Invoke orchestrator with structured request
-        await self.airflow_app_orchestrator(new_dag_request)
-
-    async def migrate_dag_flow_start(self):
-        """
-        Start of flow to invoke the DAG Orchestrator that migrates a DAG from Airflow 1.0 to 2.0.
-
-        """
-        logger.debug("starting migration")
-        if not self.options:
-            logger.debug("not options")
-
-            self.options = dag_mirgration_agent()
-            self.client = ClaudeSDKClient(self.options)
-        await self.client.connect()
-        await asyncio.sleep(1)
-        start = time.perf_counter()
-        project_path = Path(self.project_dir)
-        project_path.mkdir(parents=True, exist_ok=True)
-        display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
-
-        # Get user requirements
-        display_message(
-            "\n[bold cyan]📦 Legacy DAG Migration - Configuration[/bold cyan]\n"
-        )
-
-        legacy_dag_path = input(
-            "Path to legacy DAG file (relative or absolute): "
-        ).strip()
-        if not legacy_dag_path:
-            display_message("[red]Error: Legacy DAG path is required[/red]")
-            return
-
-        file = file_path_creator(legacy_dag_path)
-
-        new_dag_name = input("New DAG name (leave blank to use same name): ").strip()
-
-        # Get cwd_path from agent options
-        agent_options = dag_mirgration_agent()
-        cwd_path = agent_options.cwd if hasattr(agent_options, "cwd") else None
-
-        self.user_prompt = dag_migration_user_prompt(
-            legacy_dag_path, new_dag_name, cwd_path
-        )
-
-        display_message(
-            "[bold cyan]🚀 Starting Airflow DAG creation orchestrator...[/bold cyan]\n"
-        )
-        display_message(f"[bold]Legacy DAG:[/bold] {file}")
-        display_message(
-            f"[bold]New DAG Name:[/bold] {new_dag_name if new_dag_name else '(same as original)'}\n"
-        )
-
-        # Combine orchestrator instructions with specific creation request
-
-        await self.airflow_app_orchestrator(self.user_prompt)
 
     async def airflow_app_orchestrator(self, prompt: str):
         """
@@ -389,19 +342,15 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                 total_messages = 0  # Includes StreamEvents for display purposes
 
                 async for message in self.client.receive_response():
+                    # console.print(f"3  message boof in self.client.receive_response(): {message}")
+
                     total_messages += 1
                     # Convert message to string and escape special chars for safe logging
                     # Escape curly braces (format placeholders) and angle brackets (color tags)
-                    safe_msg = (
-                        str(message)
-                        .replace("{", "{{")
-                        .replace("}", "}}")
-                        .replace("<", r"\<")
-                        .replace(">", r"\>")
-                    )
-                    logger.debug(safe_msg)
+
+                    # console.print(safe_msg(message))
                     # Skip StreamEvent messages entirely - they are logged to file only
-                    display_message(message, print_raw=True)
+                    # display_message(message, print_raw=True)
 
                     message_count += 1
                     message_start_time = time.perf_counter()
@@ -410,7 +359,7 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                     if isinstance(message, AssistantMessage):
                         self.turn_count += 1
 
-                        display_message(message, iteration=self.turn_count)
+                        # display_message(message, iteration=self.turn_count)
 
                     # Display message header
                     display_message(
@@ -421,7 +370,7 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                     )
 
                     # Display the message with debugging context
-                    display_message(message, iteration=message_count)
+                    # display_message(message, iteration=message_count)
 
                     # Track message-specific metrics
                     if isinstance(message, AssistantMessage):
@@ -566,14 +515,16 @@ if __name__ == "__main__":
         # logging setup
         CLAUDE_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         log_config.setup(CLAUDE_LOG_LEVEL)
+        # Script location: /home/dev/claude_swarm/airflow_agent.py
+        script_path = Path(__file__).resolve()
 
-        # Get project and workspace roots using helpers
-        proj_root = project_root()  # e.g., /Users/mike.porenta/python_dev/aptive_github/claude_swarm
-        work_root = workspace_root()  # e.g., /Users/mike.porenta/python_dev
+        # Project root: /home/dev (where CLAUDE.md is located)
+        project_root = script_path.parent.parent  # /home/dev
 
-        # Output directory: Use workspace-based paths
-        output_dir = str(work_root / "aptive_github" / "data-airflow" / "dags")
-        dev_airflow_dir = work_root / "aptive_github"
+        # Output directory: Use Linux paths
+        output_dir = str(project_root / "airflow" / "data-airflow" / "dags")
+
+        dev_airflow_dir = project_root
 
         display_message(
             "[bold magenta]╔══════════════════════════════════════════════════════╗[/bold magenta]"
@@ -584,8 +535,7 @@ if __name__ == "__main__":
         display_message(
             "[bold magenta]╚══════════════════════════════════════════════════════╝[/bold magenta]\n"
         )
-        display_message(f"[dim]Project root: {proj_root}[/dim]")
-        display_message(f"[dim]Workspace root: {work_root}[/dim]")
+        display_message(f"[dim]Project root (CLAUDE.md location): {project_root}[/dim]")
         display_message(f"[dim]Default output directory: {output_dir}[/dim]")
         display_message(f"[dim]Additional access: {dev_airflow_dir}[/dim]\n")
 
@@ -605,14 +555,14 @@ if __name__ == "__main__":
         CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "sonnet")
         display_message(f"Using CLAUDE_MODEL env: {CLAUDE_MODEL}")
 
-        # Build environment configuration from .env settings with sensible defaults using helper functions
-        default_airflow_root = work_root / "aptive_github" / "data-airflow"
+        # Build environment configuration from .env settings with sensible defaults
+        default_airflow_root = project_root / "airflow" / "data-airflow"
         default_airflow_dags = default_airflow_root / "dags"
-        default_legacy_root = work_root / "aptive_github" / "data-airflow-legacy"
+        default_legacy_root = project_root / "airflow" / "data-airflow-legacy"
         default_legacy_dags = default_legacy_root / "dags"
 
         env_defaults = {
-            "AIRFLOW_HOME": str(work_root / "aptive_github"),
+            "AIRFLOW_HOME": str(project_root),
             "AIRFLOW__CORE__DAGS_FOLDER": str(default_airflow_dags),
             "AIRFLOW_2_DAGS_DIR": str(default_airflow_dags),
             "AIRFLOW_2_ROOT": str(default_airflow_root),
@@ -630,8 +580,7 @@ if __name__ == "__main__":
         if python_path:
             env_config["PYTHONPATH"] = python_path
 
-        env_config["PROJECT_ROOT"] = str(proj_root)
-        env_config["WORKSPACE_ROOT"] = str(work_root)
+        env_config["PROJECT_ROOT"] = str(project_root)
 
         add_dirs = [
             path
@@ -648,12 +597,14 @@ if __name__ == "__main__":
         if project_dir_env:
             project_dir_path = Path(project_dir_env).resolve()
         else:
-            project_dir_path = Path(output_dir).resolve()
+            # Use the claude_swarm directory as the working directory
+            project_dir_path = Path(__file__).resolve().parent
 
         display_message(f"[dim]Session project directory: {project_dir_path}[/dim]")
         env_config["OUTPUT_DIR"] = str(project_dir_path)
+        config_dir = Path(__file__).resolve().parent
 
-        session = ConversationSession(project_dir=project_dir_path)
+        session = ConversationSession(project_dir=config_dir)
 
         def signal_handler(signum, frame):
             """Handle interrupt signals gracefully."""
@@ -664,8 +615,18 @@ if __name__ == "__main__":
 
         signal.signal(signal.SIGINT, signal_handler)
 
+        # Check if message provided via command line
+        message = None
+        if len(sys.argv) > 1:
+            message = " ".join(sys.argv[1:])
+            # Override project_dir for command-line mode to use current directory
+            session.project_dir = Path.cwd()
+            display_message(
+                f"[dim]Command-line mode: using {session.project_dir}[/dim]"
+            )
+
         try:
-            asyncio.run(session.start())
+            asyncio.run(session.start(message=message))
         except KeyboardInterrupt:
             display_message("\nInterrupted by user. Exiting...")
         except Exception as e:

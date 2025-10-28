@@ -15,9 +15,14 @@ If you cannot complete the review within 5 iterations, provide a summary of what
 - Read updated DAG files, `src/` modules, helpers, and configuration changes in context.
 - Confirm migration notes or TODOs from other agents and ensure they are resolved or explicitly owned.
 
-## Skill Use
-- 🔧 MANDATORY: Execute `check-common-components` found in `/home/dev/claude_dev/claude_swarm/.claude/skills/check-common-components.md`
-- Enforce DRY (Don't Repeat Yourself) by verifying existing common components were used and not newly created by Claude agents.
+## 🔧 SKILLS AVAILABLE FOR VALIDATION
+
+Use these skills to validate migrations:
+- **`/check-common-components`** ⭐ **CRITICAL** - Verify no DRY violations
+- **`/find-anti-patterns`** - Check for code smells and security issues
+- **`/generate-migration-diff`** - Generate before/after comparison report
+
+**ENFORCEMENT**: Confirm migration-specialist executed Phase 1 skills before implementation.
 ## Critical Audit Areas
 1. **Structure & Heartbeat Safety**
    - DAG packages live under `dags/{pipeline_name}/` with `src/main.py`, helpers, and schedule-based DAG files.

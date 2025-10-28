@@ -7,10 +7,14 @@ from tzlocal import get_localzone
 from datetime import datetime, date
 from pathlib import Path
 from dotenv import load_dotenv
+import sentry_sdk
+from sentry_sdk.integrations.loguru import LoguruIntegration
+from sentry_sdk.integrations.loguru import LoggingLevels
 
 load_dotenv()
 env_log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
 print(f"Log level set to: {env_log_level}")
+import sentry_sdk
 
 
 class LogConfig:
@@ -19,6 +23,7 @@ class LogConfig:
     def __init__(
         self, root_dir: str = None, timezone: str = None, log_level: str = "DEBUG"
     ):
+        self.logger = logger
         self._configured: bool = False
         self.root_dir = root_dir or str(Path(__file__).parent.parent)
         self.logs_dir = os.path.join(self.root_dir, "logs")
@@ -50,12 +55,27 @@ class LogConfig:
 
         # Pretty format for structured data
         self.pretty_format = lambda record: self._format_record(record)
+        sentry_sdk.init(
+            dsn="https://586645b1744aa1be7b773837d822f918@o4510262831546368.ingest.us.sentry.io/4510262842490880",
+            # Add data like request headers and IP for users, if applicable;
+            # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+            send_default_pii=True,
+            traces_sample_rate=1.0,
+            enable_logs=True,
+            integrations=[
+                LoguruIntegration(
+                    level=LoggingLevels.INFO.value,  # Capture INFO and above as breadcrumbs
+                    event_level=LoggingLevels.ERROR.value,  # Send ERROR logs as events
+                    sentry_logs_level=LoggingLevels.INFO.value,  # Capture INFO and above as logs
+                )
+            ],
+        )
 
     def set_logging_level(self, level: str):
         """Set the logging level dynamically"""
         self.log_level = level
         if self._configured:
-            logger.remove()
+            self.logger.remove()
             self.setup()
         print("\n" + "=" * 80)
         print(f"🤖 Logging level set to {level} 🤖")
@@ -122,7 +142,7 @@ class LogConfig:
             return
         # Remove any existing handlers
 
-        logger.remove()
+        self.logger.remove()
 
         # Derive today's date in specified timezone
         today_str = self.today_str()
@@ -146,7 +166,7 @@ class LogConfig:
         debug_log_path = os.path.join(self.logs_dir, f"{today_str}_debug.log")
 
         # Add console logging with standard format
-        logger.add(
+        self.logger.add(
             sink=sys.stderr,
             level=self.log_level,
             format=self.log_format,
@@ -155,7 +175,7 @@ class LogConfig:
         )
 
         # Primary application log
-        logger.add(
+        self.logger.add(
             sink=app_log_path,
             level=self.log_level,
             format=self.log_format,
@@ -166,7 +186,7 @@ class LogConfig:
         )
 
         # Error-only logs with more detail
-        logger.add(
+        self.logger.add(
             sink=error_log_path,
             level="ERROR",
             format=self.debug_format,
@@ -179,7 +199,7 @@ class LogConfig:
         )
 
         # Debug logs with full detail (always enabled, regardless of main log level)
-        logger.add(
+        self.logger.add(
             sink=debug_log_path,
             level="DEBUG",
             format=self.debug_format,
@@ -189,7 +209,7 @@ class LogConfig:
             enqueue=True,
         )
         self._configured = True
-        logger.debug(
+        self.logger.debug(
             f"Logging configured with dated files: {app_log_path}, "
             f"{error_log_path}, {debug_log_path}"
         )

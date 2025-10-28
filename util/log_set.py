@@ -6,7 +6,9 @@ from typing import Dict, Any, Optional
 from tzlocal import get_localzone
 from datetime import datetime, date
 from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv()
 env_log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
 print(f"Log level set to: {env_log_level}")
 
@@ -176,17 +178,16 @@ class LogConfig:
             enqueue=True,
         )
 
-        # Debug logs with full detail (only if DEBUG)
-        if self.log_level == "DEBUG":
-            logger.add(
-                sink=debug_log_path,
-                level="DEBUG",
-                format=self.debug_format,
-                rotation="100 MB",
-                retention="3 days",
-                compression="zip",
-                enqueue=True,
-            )
+        # Debug logs with full detail (always enabled, regardless of main log level)
+        logger.add(
+            sink=debug_log_path,
+            level="DEBUG",
+            format=self.debug_format,
+            rotation="100 MB",
+            retention="3 days",
+            compression="zip",
+            enqueue=True,
+        )
         self._configured = True
         logger.debug(
             f"Logging configured with dated files: {app_log_path}, "

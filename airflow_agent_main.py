@@ -28,7 +28,9 @@ import sys
 import time
 from pathlib import Path
 
-load_dotenv(Path(__file__).resolve().parent / ".env.airflow", override=True)
+print(f"sys.path before modification: {sys.path}")
+CLAUDE_LOG_LEVEL = os.getenv("CLAUDE_LOG_LEVEL", "INFO")
+print(f"CLAUDE_LOG_LEVEL: {CLAUDE_LOG_LEVEL}")
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -84,6 +86,7 @@ class ConversationSession:
             display_message("  2. 📦 Start a legacy DAG migration")
 
             while True:
+                await asyncio.sleep(1)  # Allow event loop to process other tasks
                 user_input = input(f"\n[Turn {self.turn_count + 1}] You: ")
 
                 if user_input.lower() == "exit":
@@ -540,7 +543,7 @@ if __name__ == "__main__":
         project_root = script_path.parent.parent  # /home/dev
 
         # Output directory: /home/dev/claude_swarm/generated_code
-        output_dir = "data-airflow/dags"
+        output_dir = "/Users/mike.porenta/python_dev/aptive_github/data-airflow/dags"
 
         dev_airflow_dir = project_root
 
@@ -574,9 +577,13 @@ if __name__ == "__main__":
         display_message(f"Using CLAUDE_MODEL env: {CLAUDE_MODEL}")
 
         # Build environment configuration from .env settings with sensible defaults
-        default_airflow_root = project_root / "data-airflow"
+        default_airflow_root = Path(
+            "/Users/mike.porenta/python_dev/aptive_github/data-airflow"
+        )
         default_airflow_dags = default_airflow_root / "dags"
-        default_legacy_root = project_root / "data-airflow-legacy"
+        default_legacy_root = Path(
+            "/Users/mike.porenta/python_dev/aptive_github/data-airflow-legacy"
+        )
         default_legacy_dags = default_legacy_root / "dags"
 
         env_defaults = {
@@ -613,11 +620,9 @@ if __name__ == "__main__":
         # Determine session project directory from environment overrides
         project_dir_env = os.getenv("OUTPUT_DIR")
         if project_dir_env:
-            project_dir_path = Path(project_dir_env)
-            if not project_dir_path.is_absolute():
-                project_dir_path = (project_root / project_dir_path).resolve()
+            project_dir_path = Path(project_dir_env).resolve()
         else:
-            project_dir_path = (project_root / output_dir).resolve()
+            project_dir_path = Path(output_dir).resolve()
 
         display_message(f"[dim]Session project directory: {project_dir_path}[/dim]")
         env_config["OUTPUT_DIR"] = str(project_dir_path)

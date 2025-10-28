@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import sentry_sdk  # noqa: E402
 from rich import print  # noqa: E402
 from rich.console import Console  # noqa: E402
 from claude_agent_sdk import (  # noqa: E402
@@ -21,45 +20,22 @@ from claude_agent_sdk import (  # noqa: E402
     UserMessage,
     SystemMessage,
 )
-from claude_agent_sdk.types import StreamEvent  # noqa: E402
 
 from util.log_set import logger, log_config  # noqa: E402
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_LEVEL = log_config.log_level if log_config else "DEBUG"
 print(f"[dim]Helper LOG_LEVEL: {LOG_LEVEL}[/dim]")
-
-
-def send_to_sentry(message: str):
-    """
-    Send a message to Sentry as a breadcrumb.
-
-    Args:
-        message: Message to send to Sentry
-    """
-    sentry_sdk.add_breadcrumb(
-        category="info",
-        message=message[:500],  # Truncate long messages
-        level="info",
-    )
-    sentry_sdk.logger.info(f"Debug log: {message}")
 
 
 def debug_log(message: str):
     """
-    Log debug messages to file and add as Sentry breadcrumb.
+    Log debug messages to file only.
 
     Args:
         message: Debug message to log
     """
     if LOG_LEVEL == "DEBUG":
-        log_config.log_to_file_only(message)
-
-        # Add Sentry breadcrumb for debug messages
-        sentry_sdk.add_breadcrumb(
-            category="debug",
-            message=message[:500],  # Truncate long messages
-            level="debug",
-        )
+        write_to_file(f"raw message: {log_config.today_str()}: {message}")
 
 
 def display_message(
@@ -70,12 +46,12 @@ def display_message(
 
     Args:
         msg: Message object to display (can be string or SDK message type)
-        debug: Debug level (defaults to LOG_LEVEL)
+        debug_mode: Debug level (defaults to LOG_LEVEL)
         iteration: Optional iteration number for tracking orchestration loops
+        print_raw: If True, print raw message without formatting
     """
     try:
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
         console = Console()
 
         if debug_mode:
@@ -93,20 +69,11 @@ def display_message(
                 f"User Message: {msg} msg_model {msg.model if hasattr(msg, 'model') else 'N/A'}"
             )
 
-            # Add Sentry breadcrumb for user message
             for block in msg.content:
                 if isinstance(block, TextBlock):
-                    sentry_sdk.add_breadcrumb(
-                        category="user_input",
-                        message=block.text[:200],  # Truncate for privacy
-                        level="info",
-                        data={
-                            "length": len(block.text),
-                            "model": msg.model if hasattr(msg, "model") else "N/A",
-                        },
+                    console.print(
+                        f"[cyan]🧑 [{log_config.today_str()}] User:[/cyan] {block.text}"
                     )
-
-                    console.print(f"[cyan]🧑 [{timestamp}] User:[/cyan] {block.text}")
                     if debug_mode:
                         console.print(
                             f"[dim]   Character count: {len(block.text)}[/dim]"
@@ -117,8 +84,11 @@ def display_message(
             debug_log(
                 f"Assistant Message: {msg} msg_model {msg.model if hasattr(msg, 'model') else 'N/A'}"
             )
+            logger.info(
+                f"AssistantMessage model: {str(msg).replace('<', '\\<').replace('>', '\\>').replace('{', '{{').replace('}', '}}')}"
+            )
+
             # Show model info if available
-            logger.info(f"AssistantMessage model: {msg}")
             if debug_mode and hasattr(msg, "model") and msg.model:
                 console.print(f"[dim]🤖 Model: {msg.model}[/dim]")
 
@@ -135,21 +105,8 @@ def display_message(
 
             for block_idx, block in enumerate(msg.content, 1):
                 if isinstance(block, TextBlock):
-                    # Add Sentry breadcrumb for assistant text response
-                    sentry_sdk.add_breadcrumb(
-                        category="assistant_response",
-                        message=block.text[:200],  # Truncate for brevity
-                        level="info",
-                        data={
-                            "length": len(block.text),
-                            "block_index": block_idx,
-                            "total_blocks": len(msg.content),
-                            "model": msg.model if hasattr(msg, "model") else "N/A",
-                        },
-                    )
-
                     console.print(
-                        f"[green]🤖 [{timestamp}] Claude:[/green] {block.text}"
+                        f"[green]🤖 [{log_config.today_str()}] Claude:[/green] {block.text}"
                     )
                     if debug_mode:
                         debug_log(
@@ -162,17 +119,9 @@ def display_message(
                         )
 
                 elif isinstance(block, ThinkingBlock):
-                    # Add Sentry breadcrumb for thinking
-                    sentry_sdk.add_breadcrumb(
-                        category="assistant_thinking",
-                        message=block.thinking[:200],
-                        level="debug",
-                        data={"length": len(block.thinking), "block_index": block_idx},
-                    )
-
                     thinking_preview = block.thinking[:300]
                     console.print(
-                        f"[yellow]💭 [{timestamp}] Thinking:[/yellow] "
+                        f"[yellow]💭 [{log_config.today_str()}] Thinking:[/yellow] "
                         f"{thinking_preview}..."
                     )
                     if debug_mode:
@@ -187,35 +136,8 @@ def display_message(
                             )
 
                 elif isinstance(block, ToolUseBlock):
-                    # Create Sentry span for tool execution
-                    with sentry_sdk.start_span(
-                        op="gen_ai.execute_tool", name=f"execute_tool {block.name}"
-                    ) as tool_span:
-                        tool_span.set_data("gen_ai.operation.name", "execute_tool")
-                        tool_span.set_data("tool_name", block.name)
-                        tool_span.set_data("tool_id", block.id)
-                        tool_span.set_data("block_index", block_idx)
-
-                        # Serialize tool input (truncate if too large)
-                        tool_input_str = str(block.input)
-                        if len(tool_input_str) > 1000:
-                            tool_input_str = tool_input_str[:1000] + "... (truncated)"
-                        tool_span.set_data("tool_input", tool_input_str)
-
-                    # Add breadcrumb for tool use
-                    sentry_sdk.add_breadcrumb(
-                        category="tool_use",
-                        message=f"Tool: {block.name}",
-                        level="info",
-                        data={
-                            "tool_name": block.name,
-                            "tool_id": block.id,
-                            "input_preview": str(block.input)[:200],
-                        },
-                    )
-
                     console.print(
-                        f"[magenta]⚙️  [{timestamp}] Tool Use:[/magenta] {block.name}"
+                        f"[magenta]⚙️  [{log_config.today_str()}] Tool Use:[/magenta] {block.name}"
                     )
                     input_preview = str(block.input)[:300]
                     console.print(f"   Input: {input_preview}...")
@@ -238,23 +160,8 @@ def display_message(
                     )
                     status_icon = "❌" if block.is_error else "✅"
 
-                    # Add Sentry breadcrumb for tool result
-                    sentry_sdk.add_breadcrumb(
-                        category="tool_result",
-                        message=f"Tool result: {result_preview[:100]}",
-                        level="error" if block.is_error else "info",
-                        data={
-                            "tool_use_id": block.tool_use_id,
-                            "is_error": block.is_error,
-                            "result_length": (
-                                len(str(block.content)) if block.content else 0
-                            ),
-                            "block_index": block_idx,
-                        },
-                    )
-
                     console.print(
-                        f"[blue]{status_icon} [{timestamp}] Tool Result:[/blue] {result_preview}..."
+                        f"[blue]{status_icon} [{log_config.today_str()}] Tool Result:[/blue] {result_preview}..."
                     )
                     if debug_mode:
                         debug_log(
@@ -270,23 +177,10 @@ def display_message(
 
         # SystemMessage handling
         elif isinstance(msg, SystemMessage):
-            # Add Sentry context for system message
-            if hasattr(msg, "data") and isinstance(msg.data, dict):
-                sentry_sdk.add_breadcrumb(
-                    category="system_message",
-                    message=f"System: {msg.data.get('subtype', 'N/A')}",
-                    level="info",
-                    data={
-                        "subtype": msg.data.get("subtype", "N/A"),
-                        "session_id": msg.data.get("session_id", "N/A"),
-                        "model": msg.data.get("model", "N/A"),
-                        "num_agents": len(msg.data.get("agents", [])),
-                        "num_tools": len(msg.data.get("tools", [])),
-                    },
-                )
-
             if debug_mode:
-                console.print(f"[dim]ℹ️  [{timestamp}] System Message[/dim]")
+                console.print(
+                    f"[dim]ℹ️  [{log_config.today_str()}] System Message[/dim]"
+                )
                 # SystemMessage has 'data' attribute, not 'content'
                 if hasattr(msg, "data") and isinstance(msg.data, dict):
                     console.print(
@@ -313,60 +207,8 @@ def display_message(
 
         # ResultMessage handling with detailed metrics
         elif isinstance(msg, ResultMessage):
-            # Capture comprehensive metrics in Sentry context
-            usage_data = {}
-            if msg.usage and isinstance(msg.usage, dict):
-                usage_data = {
-                    "input_tokens": msg.usage.get("input_tokens", 0),
-                    "output_tokens": msg.usage.get("output_tokens", 0),
-                    "cache_read_input_tokens": msg.usage.get(
-                        "cache_read_input_tokens", 0
-                    ),
-                    "cache_creation_input_tokens": msg.usage.get(
-                        "cache_creation_input_tokens", 0
-                    ),
-                    "stop_reason": msg.usage.get("stop_reason", "N/A"),
-                }
-
-            # Set comprehensive Sentry context for metrics
-            sentry_sdk.set_context("claude_usage", usage_data)
-
-            # Add cost and duration data
-            metrics_data = {
-                "total_cost_usd": (
-                    float(msg.total_cost_usd) if msg.total_cost_usd else 0.0
-                ),
-                "duration_ms": (
-                    msg.duration_ms
-                    if hasattr(msg, "duration_ms") and msg.duration_ms
-                    else 0
-                ),
-                "duration_api_ms": (
-                    msg.duration_api_ms
-                    if hasattr(msg, "duration_api_ms") and msg.duration_api_ms
-                    else 0
-                ),
-                "num_turns": (
-                    msg.num_turns if hasattr(msg, "num_turns") and msg.num_turns else 0
-                ),
-                "session_id": (
-                    msg.session_id
-                    if hasattr(msg, "session_id") and msg.session_id
-                    else "N/A"
-                ),
-            }
-            sentry_sdk.set_context("claude_metrics", metrics_data)
-
-            # Add breadcrumb with summary
-            sentry_sdk.add_breadcrumb(
-                category="result_message",
-                message=f"Result: {usage_data.get('input_tokens', 0)} in, {usage_data.get('output_tokens', 0)} out tokens",
-                level="info",
-                data={**usage_data, **metrics_data},
-            )
-
             console.print(
-                f"[bold green]✅ [{timestamp}] " "Result Message Received[/bold green]"
+                f"[bold green]✅ [{log_config.today_str()}] Result Message Received[/bold green]"
             )
 
             # Cost information
@@ -375,7 +217,7 @@ def display_message(
                 cost = float(msg.total_cost_usd)
                 if cost > 0:
                     console.print(
-                        f"[bold yellow]💰 Total Cost: ${cost:.6f}" "[/bold yellow]"
+                        f"[bold yellow]💰 Total Cost: ${cost:.6f}[/bold yellow]"
                     )
 
             # Token usage information
@@ -423,18 +265,6 @@ def display_message(
                         f"[dim]   Stop reason: {msg.usage['stop_reason']}[/dim]"
                     )
 
-        # StreamEvent handling - log to file only, no console output
-        elif isinstance(msg, StreamEvent):
-            # Write to log file only
-            today_str = datetime.now().strftime("%Y_%m_%d")
-            logs_dir = Path(__file__).parent.parent / "logs"
-            logs_dir.mkdir(exist_ok=True)
-            log_file = logs_dir / f"{today_str}_app.log"
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp} | INFO | StreamEvent: {msg}\n")
-            return
-
         # Unknown message type - just print it
         else:
             console.print(msg)
@@ -443,19 +273,6 @@ def display_message(
 
     except Exception as e:
         logger.error(f"Error displaying message: {e}", exc_info=True)
-
-        # Capture exception in Sentry with context
-        sentry_sdk.set_context(
-            "message_display_error",
-            {
-                "message_type": type(msg).__name__ if msg else "unknown",
-                "error": str(e),
-                "debug_mode": debug_mode,
-                "iteration": iteration,
-            },
-        )
-        sentry_sdk.capture_exception(e)
-
         print(f"Error displaying message: {e}")
 
 
@@ -498,10 +315,8 @@ def file_path_creator(path_input: str) -> str:
 
         # Define search locations in priority order
         script_dir = Path(__file__).resolve().parent
-        project_root = find_project_root(
-            script_dir
-        )  # /home/dev/claude_dev/claude_swarm
-        parent_root = project_root.parent  # /home/dev/claude_dev
+        project_root = find_project_root(script_dir)
+        parent_root = project_root.parent
         current_dir = Path.cwd()
 
         search_roots = [
@@ -527,8 +342,7 @@ def file_path_creator(path_input: str) -> str:
             f"Could not find path: '{path_input}'\n"
             f"Searched in the following locations:\n"
             + "\n".join(f"  - {p}" for p in tried_paths)
-            + f"\n\nTip: Use absolute path (e.g., /home/dev/claude_dev/airflow/...) or "
-            f"verify the relative path is correct."
+            + f"\n\nTip: Use absolute path or verify the relative path is correct."
         )
 
     except FileNotFoundError:
@@ -552,7 +366,6 @@ def load_markdown_for_prompt(relative_path: str) -> str:
         str: Clean markdown text as a string.
     """
     try:
-
         # Find project root by walking upward until we find a known marker
         def find_project_root(start: Path) -> Path:
             markers = {"pyproject.toml", "requirements.txt", ".git"}
@@ -579,3 +392,45 @@ def load_markdown_for_prompt(relative_path: str) -> str:
         print(f"Error loading markdown for prompt: {e}")
         logger.error(f"Error loading markdown for prompt: {e}", exc_info=True)
         raise RuntimeError(f"Error loading markdown for prompt: {e}") from e
+
+
+def write_to_file(msg):
+    """
+    Write a message to a log file in the project's logs directory using today's date in the filename.
+
+    Args:
+        msg: Message to write to the log file (can be string or any object with string representation)
+    """
+    try:
+        # Find project root by walking upward until we find a known marker
+        def find_project_root(start: Path) -> Path:
+            markers = {"pyproject.toml", "requirements.txt", ".git"}
+            for parent in [start] + list(start.parents):
+                if any((parent / marker).exists() for marker in markers):
+                    return parent
+            return start  # fallback to script directory if nothing found
+
+        script_dir = Path(__file__).resolve().parent
+        project_root = find_project_root(script_dir)
+        logs_dir = project_root / "logs"
+
+        # Create logs directory if it doesn't exist
+        logs_dir.mkdir(exist_ok=True)
+
+        # Create filename with today's date
+        today = datetime.now().strftime("%Y-%m-%d")
+        log_file = logs_dir / f"{today}_log_to_file.log"
+
+        # Convert message to string if it's not already
+        message_str = str(msg)
+
+        # Write message to file with log_config.today_str()
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{log_config.today_str()}] {message_str}\n")
+
+        logger.debug(f"Message written to {log_file}")
+
+    except Exception as e:
+        logger.error(f"Error writing message to file: {e}", exc_info=True)
+        print(f"Error writing message to file: {e}")

@@ -7,6 +7,9 @@ You enforce the quality bar for Apache Airflow 2 code based on `airflow/airflow_
 - Read updated DAG files, `src/` modules, helpers, and configuration changes in context.
 - Confirm migration notes or TODOs from other agents and ensure they are resolved or explicitly owned.
 
+## Skill Use
+- 🔧 MANDATORY: Execute `check-common-components` found in `/home/dev/claude_dev/claude_swarm/.claude/skills/check-common-components.md` 
+- Enforce DRY (Don't Repeat Yourself) by verifying existing common components were used and not newly created by Claude agents.
 ## Critical Audit Areas
 1. **Structure & Heartbeat Safety**
    - DAG packages live under `dags/{pipeline_name}/` with `src/main.py`, helpers, and schedule-based DAG files.
@@ -28,6 +31,9 @@ You enforce the quality bar for Apache Airflow 2 code based on `airflow/airflow_
    - Metrics or notes covering runtime, connection usage, and cost impacts where relevant.
 7. **Testing & Validation Evidence**
    - Proof of local/staging runs, data parity checks, failure-mode testing, and performance sampling—or TODOs with owners and timelines.
+8. **Testing & Validation Evidence**
+   - Lint: pip install flake8 && flake8 (required before PR merge)
+   - Raise flake8 errors and warnings.  Send them ask `Tasks` to @migration-specialist.
 
 ## Review Output Format
 - **Blockers**: violations of standards, missing validation, or structural issues that must be resolved before merge.

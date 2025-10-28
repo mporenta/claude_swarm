@@ -38,7 +38,7 @@ def debug_log(message: str):
         write_to_file(f"raw message: {log_config.today_str()}: {message}")
 
 
-def display_message(
+async def display_message(
     msg, debug_mode: str = LOG_LEVEL, iteration: int = None, print_raw: bool = False
 ):
     """
@@ -275,7 +275,242 @@ def display_message(
         logger.error(f"Error displaying message: {e}", exc_info=True)
         print(f"Error displaying message: {e}")
 
+def display_message(
+    msg, debug_mode: str = LOG_LEVEL, iteration: int = None, print_raw: bool = False
+):
+    """
+    Claude SDK standardized message display function with status indicators.
 
+    Args:
+        msg: Message object to display (can be string or SDK message type)
+        debug_mode: Debug level (defaults to LOG_LEVEL)
+        iteration: Optional iteration number for tracking orchestration loops
+        print_raw: If True, print raw message without formatting
+    """
+    try:
+
+        console = Console()
+
+        if debug_mode:
+            if print_raw:
+                debug_log(msg)
+                return
+            if isinstance(msg, str):
+                debug_log(msg)
+                console.print(msg)
+                return
+
+        # UserMessage handling
+        if isinstance(msg, UserMessage):
+            debug_log(
+                f"User Message: {msg} msg_model {msg.model if hasattr(msg, 'model') else 'N/A'}"
+            )
+
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    console.print(
+                        f"[cyan]🧑 [{log_config.today_str()}] User:[/cyan] {block.text}"
+                    )
+                    if debug_mode:
+                        console.print(
+                            f"[dim]   Character count: {len(block.text)}[/dim]"
+                        )
+
+        # AssistantMessage handling
+        elif isinstance(msg, AssistantMessage):
+            debug_log(
+                f"Assistant Message: {msg} msg_model {msg.model if hasattr(msg, 'model') else 'N/A'}"
+            )
+            logger.info(
+                f"AssistantMessage model: {str(msg).replace('<', '\\<').replace('>', '\\>').replace('{', '{{').replace('}', '}}')}"
+            )
+
+            # Show model info if available
+            if debug_mode and hasattr(msg, "model") and msg.model:
+                console.print(f"[dim]🤖 Model: {msg.model}[/dim]")
+
+            # Show if this is a subagent response (has parent_tool_use_id)
+            if (
+                debug_mode
+                and hasattr(msg, "parent_tool_use_id")
+                and msg.parent_tool_use_id
+            ):
+                debug_log(
+                    f"Subagent response (parent_tool_use_id: {msg.parent_tool_use_id})"
+                )
+                console.print("[dim]🔗 Subagent Response[/dim]")
+
+            for block_idx, block in enumerate(msg.content, 1):
+                if isinstance(block, TextBlock):
+                    console.print(
+                        f"[green]🤖 [{log_config.today_str()}] Claude:[/green] {block.text}"
+                    )
+                    if debug_mode:
+                        debug_log(
+                            f"[dim]   Block msg.content: {block_idx}/{msg.content} | "
+                            f"block.text: {block.text}"
+                        )
+                        console.print(
+                            f"[dim]   Block {block_idx}/{len(msg.content)} | "
+                            f"Length: {len(block.text)} chars[/dim]"
+                        )
+
+                elif isinstance(block, ThinkingBlock):
+                    thinking_preview = block.thinking[:300]
+                    console.print(
+                        f"[yellow]💭 [{log_config.today_str()}] Thinking:[/yellow] "
+                        f"{thinking_preview}..."
+                    )
+                    if debug_mode:
+                        console.print(
+                            f"[dim]   Block {block_idx}/{len(msg.content)} | "
+                            f"Full length: {len(block.thinking)} chars[/dim]"
+                        )
+                        # Show full thinking in debug mode
+                        if len(block.thinking) > 300:
+                            console.print(
+                                f"[dim]   Full thinking: {block.thinking}[/dim]"
+                            )
+
+                elif isinstance(block, ToolUseBlock):
+                    console.print(
+                        f"[magenta]⚙️  [{log_config.today_str()}] Tool Use:[/magenta] {block.name}"
+                    )
+                    input_preview = str(block.input)[:300]
+                    console.print(f"   Input: {input_preview}...")
+
+                    if debug_mode:
+                        debug_log(
+                            f"ToolUseBlock: block_idx: {block_idx} / Tool: {block.name} / ID: {block.id}"
+                        )
+                        console.print(
+                            f"[dim]   Block {block_idx}/{len(msg.content)} | "
+                            f"Tool ID: {block.id}[/dim]"
+                        )
+                        # Show full input in debug mode
+                        if len(str(block.input)) > 300:
+                            console.print(f"[dim]   Full input: {block.input}[/dim]")
+
+                elif isinstance(block, ToolResultBlock):
+                    result_preview = (
+                        str(block.content)[:300] if block.content else "No content"
+                    )
+                    status_icon = "❌" if block.is_error else "✅"
+
+                    console.print(
+                        f"[blue]{status_icon} [{log_config.today_str()}] Tool Result:[/blue] {result_preview}..."
+                    )
+                    if debug_mode:
+                        debug_log(
+                            f"ToolResultBlock: block_idx: {block_idx} / tool_use_id: {block.tool_use_id} / is_error: {block.is_error}"
+                        )
+                        console.print(
+                            f"[dim]   Block {block_idx}/{len(msg.content)} | "
+                            f"Tool Use ID: {block.tool_use_id} | "
+                            f"Error: {block.is_error}[/dim]"
+                        )
+                        if block.content and len(str(block.content)) > 300:
+                            console.print(f"[dim]   Full result: {block.content}[/dim]")
+
+        # SystemMessage handling
+        elif isinstance(msg, SystemMessage):
+            if debug_mode:
+                console.print(
+                    f"[dim]ℹ️  [{log_config.today_str()}] System Message[/dim]"
+                )
+                # SystemMessage has 'data' attribute, not 'content'
+                if hasattr(msg, "data") and isinstance(msg.data, dict):
+                    console.print(
+                        f"[dim]   Subtype: {msg.data.get('subtype', 'N/A')}[/dim]"
+                    )
+                    if "session_id" in msg.data:
+                        console.print(
+                            f"[dim]   Session ID: {msg.data['session_id']}[/dim]"
+                        )
+                    if "cwd" in msg.data:
+                        console.print(
+                            f"[dim]   Working Directory: {msg.data['cwd']}[/dim]"
+                        )
+                    if "model" in msg.data:
+                        console.print(f"[dim]   Model: {msg.data['model']}[/dim]")
+                    if "agents" in msg.data:
+                        agents_list = ", ".join(msg.data["agents"])
+                        console.print(f"[dim]   Available Agents: {agents_list}[/dim]")
+                    if "tools" in msg.data:
+                        tool_count = len(msg.data["tools"])
+                        console.print(
+                            f"[dim]   Available Tools: {tool_count} tools[/dim]"
+                        )
+
+        # ResultMessage handling with detailed metrics
+        elif isinstance(msg, ResultMessage):
+            console.print(
+                f"[bold green]✅ [{log_config.today_str()}] Result Message Received[/bold green]"
+            )
+
+            # Cost information
+            cost = 0.0
+            if msg.total_cost_usd:
+                cost = float(msg.total_cost_usd)
+                if cost > 0:
+                    console.print(
+                        f"[bold yellow]💰 Total Cost: ${cost:.6f}[/bold yellow]"
+                    )
+
+            # Token usage information
+            if msg.usage and isinstance(msg.usage, dict):
+                console.print("[bold cyan]📊 Token Usage Details:[/bold cyan]")
+                if "input_tokens" in msg.usage and msg.usage["input_tokens"]:
+                    console.print(f"   • Input tokens: {msg.usage['input_tokens']:,}")
+                if "output_tokens" in msg.usage and msg.usage["output_tokens"]:
+                    console.print(f"   • Output tokens: {msg.usage['output_tokens']:,}")
+                if (
+                    "cache_read_input_tokens" in msg.usage
+                    and msg.usage["cache_read_input_tokens"]
+                ):
+                    console.print(
+                        f"   • Cache read tokens: "
+                        f"{msg.usage['cache_read_input_tokens']:,}"
+                    )
+                if (
+                    "cache_creation_input_tokens" in msg.usage
+                    and msg.usage["cache_creation_input_tokens"]
+                ):
+                    console.print(
+                        f"   • Cache creation tokens: "
+                        f"{msg.usage['cache_creation_input_tokens']:,}"
+                    )
+
+            # Additional debug info
+            if debug_mode:
+                console.print("[dim]🔍 Result Message Details:[/dim]")
+                if hasattr(msg, "subtype") and msg.subtype:
+                    console.print(f"[dim]   Subtype: {msg.subtype}[/dim]")
+                if hasattr(msg, "num_turns") and msg.num_turns:
+                    console.print(f"[dim]   Number of turns: {msg.num_turns}[/dim]")
+                if hasattr(msg, "session_id") and msg.session_id:
+                    console.print(f"[dim]   Session ID: {msg.session_id}[/dim]")
+                if hasattr(msg, "duration_ms") and msg.duration_ms:
+                    console.print(f"[dim]   Duration: {msg.duration_ms}ms[/dim]")
+                # Check if stop_reason is in usage dict
+                if (
+                    msg.usage
+                    and isinstance(msg.usage, dict)
+                    and "stop_reason" in msg.usage
+                ):
+                    console.print(
+                        f"[dim]   Stop reason: {msg.usage['stop_reason']}[/dim]"
+                    )
+
+        # Unknown message type - just print it
+        else:
+            console.print(msg)
+            if debug_mode:
+                console.print(f"[dim]⚠️  Unknown message type: {type(msg)}[/dim]")
+
+    except Exception as e:
+        logger.error(f"Error displaying message: {e}", exc_info=True)
+        print(f"Error displaying message: {e}")
 def file_path_creator(path_input: str) -> str:
     """
     Resolve a file or directory path to an absolute path string.

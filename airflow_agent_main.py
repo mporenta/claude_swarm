@@ -30,7 +30,8 @@ from pathlib import Path
 
 print(f"sys.path before modification: {sys.path}")
 CLAUDE_LOG_LEVEL = os.getenv("CLAUDE_LOG_LEVEL", "INFO")
-print(f"CLAUDE_LOG_LEVEL: {CLAUDE_LOG_LEVEL}")
+joy = os.getenv("JOY")
+print(f"CLAUDE_LOG_LEVEL: {CLAUDE_LOG_LEVEL} and joy? {joy}")
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -40,10 +41,9 @@ from claude_agent_sdk import (
     TextBlock,
     ToolUseBlock,
     ThinkingBlock,
-    ToolResultBlock,
-    UserMessage,
-    SystemMessage,
+   
 )
+from src.agent_options import dag_mirgration_agent, dag_migration_user_prompt
 from util.helpers import load_markdown_for_prompt, display_message, file_path_creator
 from util.log_set import log_config, logger
 
@@ -57,23 +57,24 @@ display_message("[yellow]See README.md for updated usage instructions.[/yellow]\
 
 
 class ConversationSession:
-    """Maintains a single conversation session with Claude."""
+    """Maintains a single conversation session with Claude.""" 
 
     def __init__(
         self,
-        options: ClaudeAgentOptions = None,
         project_dir: Path = Path(__file__).resolve().parent,
     ):
-        self.options = options
+        self.options: ClaudeAgentOptions = None
         self.client = ClaudeSDKClient(self.options)
+        self.user_prompt: str = ""
         self.turn_count = 0
         self.project_dir = project_dir
         self.should_exit = False
+        self.legacy_dag_path = None
 
     async def start(self):
         """Start the conversation session with proper interrupt handling."""
         try:
-            await self.client.connect()
+            
             display_message(
                 "Starting Airflow agent session. Claude will remember context."
             )
@@ -111,7 +112,7 @@ class ConversationSession:
                 else:
                     # Send regular message - Claude remembers all previous messages in this session
                     try:
-                        await self.client.query(user_input)
+                        await self.client(options=ClaudeAgentOptions()).query(user_input)
                         self.turn_count += 1
 
                         # Process response
@@ -277,27 +278,33 @@ Ensure the final deliverable is production-ready and passes all quality gates.
         Start of flow to invoke the DAG Orchestrator that migrates a DAG from Airflow 1.0 to 2.0.
 
         """
+        logger.debug("starting migration")
+        if not self.options:
+            logger.debug("not options")
+        
+            self.options=dag_mirgration_agent()
+            self.client = ClaudeSDKClient(self.options)
+        await self.client.connect()
+        await asyncio.sleep(1)
         start = time.perf_counter()
         project_path = Path(self.project_dir)
         project_path.mkdir(parents=True, exist_ok=True)
         display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
 
         # Get user requirements
-        # legacy_dag_path = input("Path to legacy DAG file: ")
+        display_message("\n[bold cyan]📦 Legacy DAG Migration - Configuration[/bold cyan]\n")
 
-        legacy_dag_path = (
-            "aptive_github/data-airflow-legacy/dags/invoca_to_snowflake.py"
-        )
+        legacy_dag_path = input("Path to legacy DAG file (relative or absolute): ").strip()
+        if not legacy_dag_path:
+            display_message("[red]Error: Legacy DAG path is required[/red]")
+            return
+
         file = file_path_creator(legacy_dag_path)
-        # new_dag_name = input("New DAG name (leave blank to use same name): ")
-        new_dag_name = "invoca_to_snowflake"
 
-        migration_request = f"""
-Migrate an Airflow 1.0 DAG to Airflow 2.0 with full modernization.
+        new_dag_name = input("New DAG name (leave blank to use same name): ").strip()
+        self.user_prompt = dag_migration_user_prompt(legacy_dag_path, new_dag_name) 
 
-**Legacy DAG Path:** {file}
-**New DAG Name:** {new_dag_name if new_dag_name else "Use original name"}
-"""
+        
 
         display_message(
             "[bold cyan]🚀 Starting Airflow DAG creation orchestrator...[/bold cyan]\n"
@@ -309,20 +316,22 @@ Migrate an Airflow 1.0 DAG to Airflow 2.0 with full modernization.
 
         # Combine orchestrator instructions with specific creation request
 
-        await self.airflow_app_orchestrator(migration_request)
+        await self.airflow_app_orchestrator(self.user_prompt)
 
-    async def airflow_app_orchestrator(self, request: str):
+    async def airflow_app_orchestrator(self, prompt: str):
         """
         Orchestrator that creates a airflow web app with random styling.
         Loads prompts from markdown files via load_markdown_for_prompt().
         """
         try:
-            main_prompt = load_markdown_for_prompt(
-                "prompts/airflow_prompts/airflow-orchestrator-v2.md"
-            )
-            display_message(f"main_prompt: {main_prompt}")
+            if not prompt:
+                logger.error("The prompt was passed to the agent")
+                return
+                
+            
+         
 
-            combined_prompt = f"{main_prompt}\n\n{request}"
+            
             # Create project directories
             start_time = time.perf_counter()
             project_path = self.project_dir
@@ -358,7 +367,7 @@ Migrate an Airflow 1.0 DAG to Airflow 2.0 with full modernization.
             async with self.client:
 
                 # Use the already-connected client directly (no context manager needed)
-                await self.client.query(prompt=combined_prompt)
+                await self.client.query(prompt=prompt)
 
                 display_message(
                     f"[bold blue]{'='*60}[/bold blue]\n"
@@ -369,7 +378,10 @@ Migrate an Airflow 1.0 DAG to Airflow 2.0 with full modernization.
 
                 async for message in self.client.receive_response():
                     total_messages += 1
-                    logger.debug(message)
+                    # Convert message to string and escape special chars for safe logging
+                    # Escape curly braces (format placeholders) and angle brackets (color tags)
+                    safe_msg = str(message).replace('{', '{{').replace('}', '}}').replace('<', r'\<').replace('>', r'\>')
+                    logger.debug(safe_msg)
                     # Skip StreamEvent messages entirely - they are logged to file only
                     display_message(message, print_raw=True)
 
@@ -542,8 +554,8 @@ if __name__ == "__main__":
         # Project root: /home/dev (where CLAUDE.md is located)
         project_root = script_path.parent.parent  # /home/dev
 
-        # Output directory: /home/dev/claude_swarm/generated_code
-        output_dir = "/Users/mike.porenta/python_dev/aptive_github/data-airflow/dags"
+        # Output directory: Use Linux paths
+        output_dir = str(project_root / "airflow" / "data-airflow" / "dags")
 
         dev_airflow_dir = project_root
 
@@ -577,13 +589,9 @@ if __name__ == "__main__":
         display_message(f"Using CLAUDE_MODEL env: {CLAUDE_MODEL}")
 
         # Build environment configuration from .env settings with sensible defaults
-        default_airflow_root = Path(
-            "/Users/mike.porenta/python_dev/aptive_github/data-airflow"
-        )
+        default_airflow_root = project_root / "airflow" / "data-airflow"
         default_airflow_dags = default_airflow_root / "dags"
-        default_legacy_root = Path(
-            "/Users/mike.porenta/python_dev/aptive_github/data-airflow-legacy"
-        )
+        default_legacy_root = project_root / "airflow" / "data-airflow-legacy"
         default_legacy_dags = default_legacy_root / "dags"
 
         env_defaults = {
@@ -627,75 +635,13 @@ if __name__ == "__main__":
         display_message(f"[dim]Session project directory: {project_dir_path}[/dim]")
         env_config["OUTPUT_DIR"] = str(project_dir_path)
 
-        # Construct Claude agent options using environment-backed configuration
-        options = ClaudeAgentOptions(
-            system_prompt={
-                "type": "preset",
-                "preset": "claude_code",
-                "append": orchestrator_agent,
-            },
-            max_turns=35,
-            model=CLAUDE_MODEL,
-            setting_sources=[
-                "project"
-            ],  # This tells SDK to look for .claude/settings.json at project root
-            cwd=str(output_dir),
-            add_dirs=add_dirs,
-            env=env_config,
-            agents={
-                "dag-developer": AgentDefinition(
-                    description="Expert Airflow 2 developer for writing production-ready DAG code with type hints and best practices.",
-                    prompt=airflow_dev_prompt,
-                    tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
-                    model="haiku",
-                ),
-                "migration-specialist": AgentDefinition(
-                    description="Expert in migrating Airflow 1.0 DAGs to 2.0 with code modernization, breaking monolithic functions, and implementing clean code principles.",
-                    prompt=migration_specialist,
-                    tools=[
-                        "Read",
-                        "Write",
-                        "Edit",
-                        "Grep",
-                        "Glob",
-                        "mcp__migration__detect_legacy_imports",
-                        "mcp__migration__detect_deprecated_parameters",
-                        "mcp__migration__compare_dags",
-                    ],
-                    model="haiku",
-                ),
-                "airflow-code-reviewer": AgentDefinition(
-                    description="Code review specialist for Airflow best practices, CLAUDE.md compliance, PEP 8, type hints, and production readiness.",
-                    prompt=code_reviewer_prompt,
-                    tools=[
-                        "Read",
-                        "Grep",
-                        "Glob",
-                        "Bash",
-                        "mcp__migration__detect_legacy_imports",
-                        "mcp__migration__detect_deprecated_parameters",
-                    ],
-                    model="haiku",
-                ),
-            },
-            allowed_tools=[
-                "Read",
-                "Write",
-                "Edit",
-                "Bash",
-                "Grep",
-                "Glob",
-                "mcp__migration__detect_legacy_imports",
-                "mcp__migration__detect_deprecated_parameters",
-                "mcp__migration__compare_dags",
-            ],
-            permission_mode="acceptEdits",
-        )
+        
 
-        session = ConversationSession(options, project_dir=project_dir_path)
+        session = ConversationSession(project_dir=project_dir_path)
 
-        def signal_handler(_signum, _frame):
+        def signal_handler(signum, frame):
             """Handle interrupt signals gracefully."""
+            del signum, frame  # Suppress unused variable warnings
             display_message("\n\nReceived interrupt signal. Shutting down...")
             session.should_exit = True
             sys.exit(0)
@@ -716,3 +662,4 @@ if __name__ == "__main__":
         display_message(f"\nFatal error: {ex}")
         logger.error(f"Fatal error: {ex}")
         sys.exit(1)
+# airflow/data-airflow-legacy/dags/cresta_to_snowflake.py

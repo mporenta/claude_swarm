@@ -657,7 +657,7 @@ def write_to_file(msg):
         log_file = logs_dir / f"{today}_log_to_file.log"
 
         # Convert message to string if it's not already
-        message_str = str(msg)
+        message_str = str(logger.debug(msg))
 
         # Write message to file with log_config.today_str()
 

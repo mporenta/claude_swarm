@@ -74,7 +74,7 @@ def parse_log_file(log_path: Path):
             stats['timing'] += 1
 
         # Model information
-        elif 'msg_model' in line or 'Using agent model' in line:
+        elif 'Using agent model' in line and ("sonnet" in line or "haiku" in line) and ('msg_model' in line and not "msg_model N/A" in line):
             chunks['model_info'].append(line)
             stats['model_info'] += 1
 
@@ -197,8 +197,8 @@ def create_summary_report(output_dir: Path, stats: dict, tools: list, models: li
 def main():
     """Main execution."""
     project_root = Path(__file__).resolve().parent.parent
-    today = datetime.now().strftime("%Y_%m_%d")
-    log_path = project_root / "logs" / f"{today}_file_only.log"
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_path = project_root / "logs" / f"{today}_log_to_file.log"
     output_dir = project_root / "logs" / "analyzed"
 
     print("="*80)

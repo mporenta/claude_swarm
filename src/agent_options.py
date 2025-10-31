@@ -1,10 +1,5 @@
-import asyncio
 import os
-import signal
-import sys
-import time
 from pathlib import Path
-
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -13,7 +8,13 @@ from claude_agent_sdk import (
 from util.helpers import load_markdown_for_prompt
 from util.log_set import logger
 
-
+DATA_AIRFLOW_ROOT = os.getenv("DATA_AIRFLOW_ROOT", "/home/dev/claude_dev/airflow/data-airflow")
+DATA_AIRFLOW_LEGACY_ROOT = os.getenv(
+    "DATA_AIRFLOW_LEGACY_ROOT", "/home/dev/claude_dev/airflow/data-airflow-legacy"
+)
+DATA_AIRFLOW_DAGS_DIR = os.getenv("DATA_AIRFLOW_DAGS_DIR", f"{DATA_AIRFLOW_ROOT}/dags")
+DATA_AIRFLOW_LEGACY_DAGS_DIR = os.getenv("DATA_AIRFLOW_LEGACY_DAGS_DIR", f"{DATA_AIRFLOW_LEGACY_ROOT}/dags")
+CLAUDE_WORKING_DIR = os.getenv("CLAUDE_WORKING_DIR", "/home/dev/claude_dev")
 def dag_mirgration_agent() -> ClaudeAgentOptions:
     try:
         # Find project root using the same logic as file_path_creator
@@ -25,10 +26,10 @@ def dag_mirgration_agent() -> ClaudeAgentOptions:
                     return parent
             return start
 
-        # Get the correct working directory from environment or use project root
+        # Get the correct working directory from environment or use project root 
         script_dir = Path(__file__).resolve().parent
         project_root = find_project_root(script_dir)
-        default_cwd = project_root / "claude_dev"
+        default_cwd = project_root / "generated_dags"
 
         # Use environment variable if set, otherwise use default
         cwd_path = os.getenv("CLAUDE_WORKING_DIR", str(default_cwd))
@@ -38,66 +39,54 @@ def dag_mirgration_agent() -> ClaudeAgentOptions:
                 "type": "preset",
                 "preset": "claude_code",
                 "append": """
-CRITICAL DRY ENFORCEMENT:
-- Execute `/check-common-components` skill BEFORE recommending any custom operators, hooks, or utilities
-- For all migrations, follow the 4-phase skills workflow documented in .claude/skills/README.md
-- Phase 1 skills (validate-migration-readiness, analyze-legacy-dag, check-common-components, find-anti-patterns) are MANDATORY before implementation
-- Skills are auto-discovered from .claude/skills/ directory
+🎯 ORCHESTRATOR ROLE: DELEGATE IMMEDIATELY, DON'T MICRO-MANAGE
+
+You are an orchestrator, NOT a worker. Your ONLY job is to:
+1. Understand what DAG needs migrating
+2. IMMEDIATELY delegate to @migration-specialist via Task tool
+3. After migration completes, IMMEDIATELY delegate to @airflow-code-reviewer via Task tool
+4. Review final code review output
+
+DO NOT:
+- ❌ Read files yourself
+- ❌ Run discovery commands
+- ❌ Explore the codebase
+- ❌ Track skills yourself
+- ❌ Create TodoWrite lists
+- ❌ Spend turns on setup
+
+DO:
+- ✅ Delegate to @migration-specialist on Turn 1-2 MAX
+- ✅ Include the legacy DAG path in delegation
+- ✅ Let subagent do ALL the work
+- ✅ When migration-specialist completes, delegate to @airflow-code-reviewer
+- ✅ Review code review output when complete
+
+DELEGATION PATTERN:
+1. Task tool → migration-specialist → "Migrate {dag_path} from Airflow 1.x to 2.x. Use common components. Follow skills workflow."
+2. Task tool → airflow-code-reviewer → "Review the migrated DAG at {output_path}. Validate against Airflow 2.x best practices, check for DRY violations, run validation checks."
+
+Remember: More orchestrator turns = exponentially more cost. DELEGATE IMMEDIATELY.
 """,
             },
-            max_turns=15,  # Orchestrator only - subagents have their own iteration limits in prompts
+            max_turns=8,  # Orchestrator needs budget for: migration delegation (1-2), code review delegation (3-4), final review (5+)
             model="sonnet",
             setting_sources=["project"],
             cwd=cwd_path,
+            add_dirs=[
+                DATA_AIRFLOW_ROOT,  # New DAG source
+                DATA_AIRFLOW_LEGACY_ROOT,  # Legacy DAG destination
+            
+            ],
             # Skills are auto-discovered from .claude/skills/ directory via setting_sources=["project"]
             # The check-common-components skill is available as: /check-common-components
             agents={
                 "migration-specialist": AgentDefinition(
                     description="Converts legacy Airflow operators and patterns to modern equivalents",
-                    prompt="""You are an Apache Airflow migration expert specializing in code transformation.
-
-⚠️ ITERATION LIMIT: You have a MAXIMUM of 8 tool-use iterations to complete your task. Plan your work efficiently.
-
-🔧 MANDATORY SKILLS WORKFLOW - Execute in order:
-
-Phase 1: Pre-Migration Analysis (Iterations 1-3, ALWAYS RUN FIRST)
-1. /validate-migration-readiness - Pre-flight checklist
-2. /analyze-legacy-dag - Detailed structure analysis
-3. /check-common-components ⭐ CRITICAL - Prevent code duplication
-4. /find-anti-patterns - Identify DRY violations
-
-Phase 2: Migration Planning (Before Coding)
-5. /map-operators-to-common - Which operators to use
-6. /extract-business-logic - Where code should live
-7. /suggest-template-choice - TaskFlow vs Traditional
-8. /analyze-connection-usage - Connection requirements
-
-Phase 3: Implementation Details (As Needed, Iterations 4-7)
-9. /compare-dag-configs - Parameter migration
-10. /check-xcom-patterns - XCom conversion
-11. /identify-dependencies - Dependency patterns
-12. /check-dynamic-tasks - Loop conversion
-
-Phase 4: Handoff (Iteration 8)
-- Document all skills executed and their findings
-- Report LOC reduction, anti-patterns eliminated
-- Hand off to airflow-code-reviewer
-
-CRITICAL RULES:
-- DO NOT SKIP Phase 1 skills - They prevent wasted effort
-- ALWAYS run /check-common-components before custom code
-- Document skill results before implementation
-- Use existing components from common/ per skill recommendations
-
-Your focus areas:
-1. **Skills execution**: Follow the 4-phase workflow above
-2. **DRY compliance**: Use common components, never duplicate
-3. **TaskFlow API**: Convert to @task where appropriate
-4. **Type safety**: Add type hints throughout
-5. **Documentation**: Record all decisions and skill results
-
-If you cannot complete within 8 iterations, report what's done and what remains with skill execution status.""",
-                    tools=["Read", "Write", "Edit", "Grep", "Glob"],
+                    prompt=load_markdown_for_prompt(
+            "prompts/airflow_prompts/migration-specialist.md"
+        ),
+                    tools=["Read", "Write", "Edit", "Grep", "Glob", "Bash", "Skill"],
                     model="haiku",
                 ),
                 "airflow-code-reviewer": AgentDefinition(
@@ -105,8 +94,8 @@ If you cannot complete within 8 iterations, report what's done and what remains 
                     prompt=load_markdown_for_prompt(
                         "prompts/airflow_prompts/airflow-code-reviewer.md"
                     ),
-                    tools=["Read", "Grep", "Glob", "Bash"],
-                    model="haiku",
+                    tools=["Read", "Grep", "Glob", "Bash", "Skill"],
+                    model="sonnet",
                 ),
             },
             permission_mode="acceptEdits",
@@ -118,7 +107,7 @@ If you cannot complete within 8 iterations, report what's done and what remains 
 
 
 def dag_migration_user_prompt(
-    legacy_py_file: str, new_dag_path: str, cwd_path: str = None
+    _legacy_py_file: str, _new_dag_path: str, cwd_path: str = None
 ) -> str:
     # If cwd_path not provided, use default with robust project root finding
     if cwd_path is None:
@@ -133,73 +122,44 @@ def dag_migration_user_prompt(
 
         script_dir = Path(__file__).resolve().parent
         project_root = find_project_root(script_dir)
-        default_cwd = project_root / "claude_dev"
+        default_cwd = project_root / "generated_dags"
         cwd_path = os.getenv("CLAUDE_WORKING_DIR", str(default_cwd))
 
-    prompt = f"""Perform a migration of an existing Airflow 1.x DAG to a 2.x DAG and create documentation.
+    # Use environment variables for paths
+    legacy_dag_full_path = f"{DATA_AIRFLOW_LEGACY_DAGS_DIR}/{_legacy_py_file}"
+    output_dag_full_path = f"{DATA_AIRFLOW_DAGS_DIR}/{_new_dag_path}"
+    common_components_path = f"{DATA_AIRFLOW_DAGS_DIR}/common"
+    working_dir = cwd_path if cwd_path else CLAUDE_WORKING_DIR
 
-## Task Overview
-I need you to do the migration using subagents used in a successfully migrated DAG by comparing the legacy and modern versions.
+    prompt = f"""🎯 IMMEDIATE DELEGATION REQUIRED
 
-⚠️ EFFICIENCY REQUIREMENTS:
-- You (orchestrator) have a maximum of 15 conversation turns
-- Each subagent has iteration limits defined in their prompts:
-  * @migration-specialist: 8 iterations max
-  * @airflow-code-reviewer: 5 iterations max
-- Delegate work efficiently and avoid unnecessary back-and-forth
-- Consolidate analysis and provide complete context when delegating
+**Legacy DAG:** `{legacy_dag_full_path}`
+**Output Location:** `{output_dag_full_path}`
+**Working Directory:** `{working_dir}`
 
-## 🔧 CRITICAL SKILLS WORKFLOW
+Your task: Two-step delegation process:
 
-All subagents MUST follow the 4-phase skills workflow documented in `.claude/skills/README.md`:
+STEP 1: Delegate to @migration-specialist on Turn 1 or 2 MAX
+STEP 2: After migration completes, delegate to @airflow-code-reviewer for validation
 
-**Phase 1: Pre-Migration Analysis (MANDATORY - Run First)**
-- `/validate-migration-readiness` - Pre-flight checklist
-- `/analyze-legacy-dag` - Structure analysis
-- `/check-common-components` ⭐ **NON-NEGOTIABLE** - Search common/ for existing components
-- `/find-anti-patterns` - DRY violations and security issues
+Use the Task tool immediately with this delegation:
 
-**Phase 2: Migration Planning (Before Implementation)**
-- `/map-operators-to-common` - Which common components to use
-- `/extract-business-logic` - Where code should live
-- `/suggest-template-choice` - TaskFlow vs Traditional
-- `/analyze-connection-usage` - Connection mapping
+"Migrate {legacy_dag_full_path} from Airflow 1.x to 2.x.
 
-**Phase 3: Implementation Details (As Needed)**
-- `/compare-dag-configs` - Parameter migration
-- `/check-xcom-patterns` - XCom conversion
-- `/identify-dependencies` - Dependency patterns
-- `/check-dynamic-tasks` - Loop conversion
+CRITICAL INSTRUCTIONS:
+1. FIRST: Read /home/dev/claude_dev/claude_swarm/SKILL_USAGE_CRITERIA.md - This defines which skills to run based on DAG complexity
+2. Assess DAG complexity (lines, structure) to determine file output (1-2 files for simple, 2-3 for medium, 3-5 for complex)
+3. Run ONLY mandatory skills + conditional skills that match criteria (don't run all 13 skills)
+4. Use common components from {common_components_path} - NO custom implementations
+5. Output files to {output_dag_full_path}
+6. Keep it simple: Simple DAGs stay simple (1-2 files), don't over-engineer
 
-**Phase 4: Validation (Post-Migration)**
-- `/generate-migration-diff` - Document improvements
+KEY PRINCIPLE: 'Migrate to 2.x syntax, not to best practice abstractions.'"
 
-**DO NOT skip Phase 1 skills** - They prevent hours of wasted effort and ensure DRY compliance.
+After migration completes, delegate to @airflow-code-reviewer:
 
-## File to Analyze
+"Review the migrated DAG at {output_dag_full_path}. Validate against Airflow 2.x best practices, check for DRY violations using /check-common-components skill, run flake8 validation, and provide comprehensive code review report."
 
-**Legacy DAG (Airflow 1.x):**
-`{cwd_path}/airflow/data-airflow-legacy/dags/{{legacy_py_file}}`
-
-**Migrated DAG (Airflow 2.x): Path for output**
-`{cwd_path}/airflow/data-airflow/dags/{{new_dag_path}}`
-
-## Your Deliverables
-
-- You convert legacy Apache Airflow assets into maintainable Airflow 2 implementations.
-- Use your subagents team to speed the job and to help you stay on task.
-- Use your team member: @migration-specialist as you see fit. You may use them asynchronously to speed up the work.
-- **ENFORCE Phase 1 skills execution** - Verify @migration-specialist ran all 4 Phase 1 skills before implementation
-- Ensure all agents use `/check-common-components` before creating custom code.
-- Review skill execution results and common component usage in final code
-- You must **END THE PROJECT** by getting a seal of approval from @airflow-code-reviewer with skills validation.
-
-## Delegation Best Practices
-- Provide complete context to subagents in your delegation prompts (don't make them re-read files unnecessarily)
-- Include analysis results, component inventory, and specific instructions
-- Request comprehensive deliverables to minimize iteration rounds
-- Only delegate when subagent expertise is truly needed
-
-Treat every migration as an opportunity to eliminate legacy anti-patterns, improve reliability, and document the new operating model.
+DO NOT explore, read files, analyze, or create todos. Your system prompt tells you exactly what to do: DELEGATE IMMEDIATELY.
 """
     return prompt

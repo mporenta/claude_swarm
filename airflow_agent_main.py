@@ -27,7 +27,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-
+from rich import print
 print(f"sys.path before modification: {sys.path}")
 CLAUDE_LOG_LEVEL = os.getenv("CLAUDE_LOG_LEVEL", "INFO")
 joy = os.getenv("JOY")
@@ -37,6 +37,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AgentDefinition,
     AssistantMessage,
+    UserMessage,
     ResultMessage,
     TextBlock,
     ToolUseBlock,
@@ -49,6 +50,7 @@ from util.helpers import (
     file_path_creator,
     workspace_root,
     project_root,
+    write_to_file
 )
 from util.log_set import log_config, logger
 
@@ -75,6 +77,7 @@ class ConversationSession:
         self.project_dir = project_dir
         self.should_exit = False
         self.legacy_dag_path = None
+        display_message(f"[dim]Session project directory: {self.project_dir}[/dim]")
 
     async def start(self):
         """Start the conversation session with proper interrupt handling."""
@@ -294,7 +297,9 @@ Ensure the final deliverable is production-ready and passes all quality gates.
         await self.client.connect()
         await asyncio.sleep(1)
         start = time.perf_counter()
+        display_message(f"[dim]📁 Output directory: {self.project_dir.absolute()}[/dim]\n")
         project_path = Path(self.project_dir)
+        display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
         project_path.mkdir(parents=True, exist_ok=True)
         display_message(f"[dim]📁 Output directory: {project_path.absolute()}[/dim]\n")
 
@@ -302,26 +307,47 @@ Ensure the final deliverable is production-ready and passes all quality gates.
         display_message(
             "\n[bold cyan]📦 Legacy DAG Migration - Configuration[/bold cyan]\n"
         )
-
-        legacy_dag_path = input(
-            "Path to legacy DAG file (relative or absolute): "
-        ).strip()
+        legacy_dag_path="/home/dev/claude_dev/airflow/data-airflow-legacy/dags/marketo_to_snowflake.py"
+        new_dag_name ="marketo_to_snowflake_migrated"
         if not legacy_dag_path:
-            display_message("[red]Error: Legacy DAG path is required[/red]")
-            return
+
+            legacy_dag_path = input(
+                "Path to legacy DAG file (relative or absolute): "
+            ).strip()
+            if not legacy_dag_path:
+                display_message("[red]Error: Legacy DAG path is required[/red]")
+                return
 
         file = file_path_creator(legacy_dag_path)
+        display_message(f"[cyan] DAG file: {file}. [/cyan]")
+        DATA_AIRFLOW_DAGS_DIR = os.getenv("DATA_AIRFLOW_DAGS_DIR")
+        display_message(f"[cyan] new_dag_name : {new_dag_name}. and legacy_dag_path {legacy_dag_path} [/cyan]")
+        if not new_dag_name:
 
-        new_dag_name = input("New DAG name (leave blank to use same name): ").strip()
+            new_dag_name = input(f"New DAG folder name for Airflow 2.0 in {DATA_AIRFLOW_DAGS_DIR} (leave blank to use same name): ").strip()
+        
+        # If no new name provided, use the legacy DAG filename (without extension)
+        if not new_dag_name:
+            legacy_path = Path(file)
+            new_dag_name = legacy_path.stem  # Get filename without extension
+        
+        # Create the full path using Path
+        new_dag_path = Path(DATA_AIRFLOW_DAGS_DIR, new_dag_name).resolve()
+        
+        # Ensure the directory exists
+        new_dag_path.mkdir(parents=True, exist_ok=True)
 
         # Get cwd_path from agent options
         agent_options = dag_mirgration_agent()
         cwd_path = agent_options.cwd if hasattr(agent_options, "cwd") else None
+        if new_dag_path and cwd_path:
 
-        self.user_prompt = dag_migration_user_prompt(
-            legacy_dag_path, new_dag_name, cwd_path
-        )
-
+            self.user_prompt = dag_migration_user_prompt(
+                legacy_dag_path, new_dag_name, cwd_path
+            )
+        else:
+            logger.error("new_dag_path or cwd_path is not set correctly.")
+            raise ValueError("new_dag_path or cwd_path is not set correctly.")
         display_message(
             "[bold cyan]🚀 Starting Airflow DAG creation orchestrator...[/bold cyan]\n"
         )
@@ -387,6 +413,7 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                     f"[bold blue]{'='*60}[/bold blue]\n"
                 )
                 total_messages = 0  # Includes StreamEvents for display purposes
+                cost = 0
 
                 async for message in self.client.receive_response():
                     total_messages += 1
@@ -400,6 +427,7 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                         .replace(">", r"\>")
                     )
                     logger.debug(safe_msg)
+                    
                     # Skip StreamEvent messages entirely - they are logged to file only
                     display_message(message, print_raw=True)
 
@@ -409,6 +437,7 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                     # Track turn count (each AssistantMessage = one agentic loop turn)
                     if isinstance(message, AssistantMessage):
                         self.turn_count += 1
+                        write_to_file(f"raw message: {log_config.today_str()}: {message}")
 
                         display_message(message, iteration=self.turn_count)
 
@@ -425,16 +454,30 @@ Ensure the final deliverable is production-ready and passes all quality gates.
 
                     # Track message-specific metrics
                     if isinstance(message, AssistantMessage):
+                        
+                        write_to_file(f"raw message: cost: {cost if cost > 0 else 0} {log_config.today_str()}: {message}")
                         for block in message.content:
+                            write_to_file(f"raw message: cost: {cost  if cost > 0 else 0} : {log_config.today_str()}: {message}")
+                          
+
                             if isinstance(block, TextBlock):
+                                
                                 text_block_count += 1
+                                write_to_file(f"raw message: cost: {cost  if cost > 0 else 0} : {log_config.today_str()}: {message}")
                             elif isinstance(block, ThinkingBlock):
+                                
                                 thinking_count += 1
+                                write_to_file(f"raw message: cost: {cost  if cost > 0 else 0} {log_config.today_str()}: {message}")
                             elif isinstance(block, ToolUseBlock):
                                 tool_use_count += 1
+                                
                                 if block.name == "Write" and "file_path" in block.input:
+                                    write_to_file(f"Write: file_path: cost: {cost  if cost > 0 else 0} : {log_config.today_str()}: {message}")
                                     files_created.append(block.input["file_path"])
-
+                    if isinstance(message, UserMessage):
+                        
+                        for block in message.content:
+                            write_to_file(f"Write: file_path: cost: {cost  if cost > 0 else 0} : {log_config.today_str()}: {message}")
                     # Calculate message processing time
                     message_end_time = time.perf_counter()
                     message_duration = message_end_time - message_start_time
@@ -446,7 +489,12 @@ Ensure the final deliverable is production-ready and passes all quality gates.
                     )
 
                     if isinstance(message, ResultMessage):
-                        cost = float(message.total_cost_usd or 0)
+                        cost = float(message.total_cost_usd  if message.total_cost_usd else 0)
+                        
+                        write_to_file(f"cost: {cost  if cost > 0 else 0} : {log_config.today_str()}: {message}")
+                        
+                        if cost > 0:
+                            write_to_file(f"Write:  {log_config.today_str()}: cost: {cost  if cost > 0 else 0} ")
                         iteration_costs.append(cost)
 
                         # Calculate final metrics
@@ -568,8 +616,12 @@ if __name__ == "__main__":
         log_config.setup(CLAUDE_LOG_LEVEL)
 
         # Get project and workspace roots using helpers
-        proj_root = project_root()  # e.g., /Users/mike.porenta/python_dev/aptive_github/claude_swarm
-        work_root = workspace_root()  # e.g., /Users/mike.porenta/python_dev
+        proj_root = project_root() 
+        work_root = workspace_root()  
+        print(f"Determined project root: {proj_root}")
+        print(f"Determined workspace root: {work_root}")
+        session = ConversationSession(project_dir=proj_root)
+        """
 
         # Output directory: Use workspace-based paths
         output_dir = str(work_root / "aptive_github" / "data-airflow" / "dags")
@@ -589,7 +641,7 @@ if __name__ == "__main__":
         display_message(f"[dim]Default output directory: {output_dir}[/dim]")
         display_message(f"[dim]Additional access: {dev_airflow_dir}[/dim]\n")
 
-        # Load markdown prompt files \
+        # Load markdown prompt files
         airflow_dev_prompt = load_markdown_for_prompt(
             "prompts/airflow_prompts/dag-developer.md"
         )
@@ -652,8 +704,10 @@ if __name__ == "__main__":
 
         display_message(f"[dim]Session project directory: {project_dir_path}[/dim]")
         env_config["OUTPUT_DIR"] = str(project_dir_path)
+        
 
-        session = ConversationSession(project_dir=project_dir_path)
+        session = ConversationSession(project_dir=work_root)
+        """
 
         def signal_handler(signum, frame):
             """Handle interrupt signals gracefully."""

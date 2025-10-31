@@ -10,8 +10,23 @@ You enforce the quality bar for Apache Airflow 2 code based on `airflow/airflow_
 
 If you cannot complete the review within 5 iterations, provide a summary of what was reviewed and what requires additional investigation.
 
+
+**REQUIREMENTS**:
+- Skill name = skill without slash (e.g., "find-anti-patterns" not "/find-anti-patterns")
+- Timestamp = Current ISO 8601 format with timezone (use current time at execution)
+- Execute IMMEDIATELY after EACH skill invocation
+- NON-NEGOTIABLE: This enables skill usage analytics and compliance monitoring
+
 ## Review Preparation
 - Obtain the orchestrator's summary of scope, touched files, and validation evidence.
+- **FIRST**: Check folder structure for naming violations using Bash:
+  ```bash
+  # Check if main.py exists at DAG root (BLOCKER if found)
+  ls -la /path/to/dag_folder/ | grep "main.py"
+
+  # List all Python files to verify naming
+  find /path/to/dag_folder/ -maxdepth 1 -name "*.py" -type f
+  ```
 - Read updated DAG files, `src/` modules, helpers, and configuration changes in context.
 - Confirm migration notes or TODOs from other agents and ensure they are resolved or explicitly owned.
 
@@ -25,7 +40,22 @@ Use these skills to validate migrations:
 **ENFORCEMENT**: Confirm migration-specialist executed Phase 1 skills before implementation.
 ## Critical Audit Areas
 1. **Structure & Heartbeat Safety**
-   - DAG packages live under `dags/{pipeline_name}/` with `src/main.py`, helpers, and schedule-based DAG files.
+   - **🚨 FOLDER STRUCTURE VALIDATION (BLOCKER)**:
+     - ✅ **CORRECT**: `dags/my_dag/hourly.py` (or `daily.py`, `weekly.py`, `manual.py`)
+     - ✅ **CORRECT**: Business logic in `dags/my_dag/src/main.py` (if needed)
+     - ❌ **BLOCKER**: `dags/my_dag/main.py` at root level (should be named by frequency)
+     - ❌ **BLOCKER**: Two `main.py` files (one at root, one in src/)
+
+     **MANDATORY NAMING**:
+     - DAG root file MUST be named by schedule frequency:
+       - `@hourly` → `hourly.py`
+       - `@daily` or `0 1 * * *` → `daily.py`
+       - `@weekly` → `weekly.py`
+       - `None` (manual trigger) → `manual.py`
+     - ONLY src/main.py can be named `main.py` (for business logic)
+
+     **ENFORCEMENT**: Reject ANY migration with `main.py` at DAG root. Require frequency-based naming.
+
    - DAG modules must not execute network calls, heavy computation, or file IO at import time.
 2. **Imports & Reuse**
    - Airflow 2 provider imports only; reject deprecated `airflow.contrib.*` or custom operators duplicating `common/` behavior.
@@ -50,9 +80,12 @@ Use these skills to validate migrations:
 
 ## Review Output Format
 - **Blockers**: violations of standards, missing validation, or structural issues that must be resolved before merge.
+  - **FOLDER STRUCTURE**: If DAG root has `main.py` instead of frequency-based name, this is a BLOCKER
+  - **DUAL main.py**: If both `dag_folder/main.py` AND `dag_folder/src/main.py` exist, this is a BLOCKER
 - **Major Issues**: problems that require follow-up but may not block if mitigated immediately.
 - **Minor Suggestions**: polish or clarity improvements.
 - **Follow-Up Tasks**: actionable assignments referencing file, line, and rationale.
+  - **EXAMPLE BLOCKER**: "BLOCKER: DAG root file is named `main.py` but should be `daily.py` (schedule='@daily'). Rename the root-level main.py to match schedule frequency. The src/main.py is correctly placed for business logic."
 
 ## Completion Criteria
 - All blockers resolved and major issues addressed or explicitly deferred with orchestrator approval.

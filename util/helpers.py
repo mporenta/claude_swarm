@@ -24,8 +24,8 @@ from claude_agent_sdk import (  # noqa: E402
 
 from util.log_set import logger, log_config  # noqa: E402
 
-ROOT_PATH = os.getenv("ROOT_PATH")
-REPO_PATH = os.getenv("REPO_PATH")
+ROOT_PATH = os.getenv("ROOT_PATH", "python_dev")
+REPO_PATH = os.getenv("REPO_PATH", "aptive_github")
 LOG_LEVEL = log_config.log_level if log_config else "INFO"
 print(f"[dim]Helper LOG_LEVEL: {LOG_LEVEL}[/dim]")
 
@@ -58,7 +58,7 @@ def debug_log(message: str):
     Args:
         message: Debug message to log
     """
-    if LOG_LEVEL == "DEBUG":
+    if LOG_LEVEL == "DEBUGccc":
         write_to_file(f"raw message: {log_config.today_str()}: {message}")
 
 
@@ -312,7 +312,7 @@ def display_message(
 
 @lru_cache(maxsize=1)
 def project_root(
-    markers=(".git", ".vscode", ".github", ".claude"), path_input: str = None
+    markers=(".git", ".vscode", ".github", ".claude"), _path_input: str = None
 ) -> Path:
     """
     Dynamically find the project root directory by walking upward until
@@ -321,10 +321,13 @@ def project_root(
     - Works regardless of where the script is run from.
     - Defaults to searching for `.git`, `.vscode`, or `.github`.
     - Falls back to the user's workspace root if none are found.
+
+    Args:
+        markers: Tuple of directory/file names that indicate project root
+        _path_input: Reserved for future use (currently unused)
     """
     print("Searching for project root...")
     current_path = Path.cwd().resolve()
-    file_path = None
 
     for parent in [current_path, *current_path.parents]:
         for marker in markers:
@@ -334,19 +337,24 @@ def project_root(
                 return parent
 
     # Fallback: assume user workspace root like '/Users/mike.porenta/python_dev'
+    fallback_path = Path.home() / ROOT_PATH if ROOT_PATH else Path.cwd()
     print(
-        f"No project root markers found. Falling back to workspace root boof - {Path.home() / ROOT_PATH}."
+        f"No project root markers found. Falling back to workspace root boof - {fallback_path}."
     )
-    return Path.home() / ROOT_PATH
+    return fallback_path
 
 
 @lru_cache(maxsize=1)
-def workspace_root(path_input: str = None) -> Path:
+def workspace_root(_path_input: str = None) -> Path:
     """
     Attempts to locate the developer workspace root — the folder that contains
-    all cloned repos
+    all cloned repos.
+
+    Args:
+        _path_input: Reserved for future use (currently unused)
     """
     current_path = Path.cwd().resolve()
+    print(f"Searching for workspace root from: {current_path}")
 
     # Case 1: Directly find 'python_dev' in the path
     for parent in [current_path, *current_path.parents]:
@@ -361,8 +369,9 @@ def workspace_root(path_input: str = None) -> Path:
             return parent.parent
 
     # Fallback
-    print(f"Defaulting to home workspace: {Path.home() / 'python_dev'}")
-    return Path.home() / ROOT_PATH
+    fallback_path = Path.home() / ROOT_PATH if ROOT_PATH else Path.cwd()
+    print(f"Defaulting to home workspace: {fallback_path}")
+    return fallback_path
 
 
 def file_path_creator(path_input: str) -> str:

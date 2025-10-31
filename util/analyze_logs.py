@@ -1,198 +1,393 @@
 #!/usr/bin/env python3
 """
-Log Analyzer - Parse and organize verbose orchestration logs by message type.
+Enhanced Log Analyzer - Parse Claude Agent SDK logs.
+
+Parses the actual log format:
+[2025_10_30] raw message: 2025_10_30: MessageType(content=[...], ...)
+
+Features:
+- Track delegation flow (orchestrator → subagents)
+- Extract file creation (Write/Edit tools)
+- Parse cost and token usage from ResultMessage
+- Identify issues (no delegation, no files, etc.)
+- Create actionable diagnostics
 """
 
 import re
+import ast
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
-def parse_log_file(log_path: Path):
-    """Parse log file and categorize by message type."""
+def parse_log_line(line: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse a single log line.
+
+    Format: [2025_10_30] raw message: 2025_10_30: MessageType(...)
+
+    Returns:
+        (message_type, message_content) or None
+    """
+    match = re.search(r'\[[\d_]+\] raw message: [\d_]+: (\w+)\((.*)\)$', line, re.DOTALL)
+    if match:
+        msg_type = match.group(1)
+        msg_content = match.group(2)
+        return (msg_type, msg_content)
+    return None
+
+def extract_tool_uses_from_line(line: str) -> List[Dict]:
+    """
+    Extract all ToolUseBlock instances from a line.
+
+    Format: ToolUseBlock(id='toolu_...', name='ToolName', input={{...}})
+    """
+    tools = []
+
+    # Find all ToolUseBlock instances
+    pattern = r"ToolUseBlock\(id='([^']+)',\s*name='([^']+)',\s*input=(\{(?:[^{}]|\{[^{}]*\})*\})\)"
+
+    for match in re.finditer(pattern, line):
+        tool_id = match.group(1)
+        tool_name = match.group(2)
+        input_str = match.group(3)
+
+        # Try to parse input dict
+        try:
+            # Replace double braces with single braces for eval
+            input_str_clean = input_str.replace('{{', '{').replace('}}', '}')
+            tool_input = ast.literal_eval(input_str_clean)
+        except:
+            tool_input = {}
+
+        tools.append({
+            "id": tool_id,
+            "name": tool_name,
+            "input": tool_input,
+            "line": line
+        })
+
+    return tools
+
+def extract_result_message_data(line: str) -> Optional[Dict]:
+    """
+    Extract cost, tokens, and num_turns from ResultMessage.
+
+    Format: ResultMessage(subtype='...', duration_ms=..., total_cost_usd=..., usage={{...}}, num_turns=...)
+    """
+    # Extract total_cost_usd
+    cost_match = re.search(r'total_cost_usd=([\d.]+)', line)
+    cost = float(cost_match.group(1)) if cost_match else 0.0
+
+    # Extract num_turns
+    turns_match = re.search(r'num_turns=(\d+)', line)
+    num_turns = int(turns_match.group(1)) if turns_match else 0
+
+    # Extract usage dict
+    usage_match = re.search(r"usage=(\{[^}]+(?:\{[^}]+\}[^}]*)*\})", line)
+    usage = {}
+    if usage_match:
+        try:
+            usage_str = usage_match.group(1)
+            # Clean up nested dicts
+            usage_str = usage_str.replace('{{', '{').replace('}}', '}')
+            usage = ast.literal_eval(usage_str)
+        except Exception as e:
+            # Fallback: extract tokens with regex
+            input_tokens_match = re.search(r"'input_tokens':\s*(\d+)", line)
+            output_tokens_match = re.search(r"'output_tokens':\s*(\d+)", line)
+            cache_read_match = re.search(r"'cache_read_input_tokens':\s*(\d+)", line)
+            cache_creation_match = re.search(r"'cache_creation_input_tokens':\s*(\d+)", line)
+
+            usage = {
+                'input_tokens': int(input_tokens_match.group(1)) if input_tokens_match else 0,
+                'output_tokens': int(output_tokens_match.group(1)) if output_tokens_match else 0,
+                'cache_read_input_tokens': int(cache_read_match.group(1)) if cache_read_match else 0,
+                'cache_creation_input_tokens': int(cache_creation_match.group(1)) if cache_creation_match else 0,
+            }
+
+    return {
+        "cost_usd": cost,
+        "num_turns": num_turns,
+        "input_tokens": usage.get('input_tokens', 0),
+        "output_tokens": usage.get('output_tokens', 0),
+        "cache_read_tokens": usage.get('cache_read_input_tokens', 0),
+        "cache_creation_tokens": usage.get('cache_creation_input_tokens', 0)
+    }
+
+def extract_delegations(tool_uses: List[Dict]) -> List[Dict]:
+    """Extract Task tool delegations to subagents."""
+    delegations = []
+
+    for tool in tool_uses:
+        if tool['name'] == 'Task':
+            delegation = {
+                "tool_id": tool['id'],
+                "subagent": tool['input'].get('subagent_type', 'unknown'),
+                "description": tool['input'].get('description', ''),
+                "prompt_preview": tool['input'].get('prompt', '')[:200] + "..." if tool['input'].get('prompt') else "",
+                "model": tool['input'].get('model', 'N/A')
+            }
+            delegations.append(delegation)
+
+    return delegations
+
+def extract_file_operations(tool_uses: List[Dict]) -> Dict[str, List[str]]:
+    """Extract file creation/modification from tool calls."""
+    operations = {
+        "created": [],
+        "edited": [],
+        "read": []
+    }
+
+    for tool in tool_uses:
+        tool_name = tool['name']
+        tool_input = tool['input']
+
+        if tool_name == 'Write' and 'file_path' in tool_input:
+            operations["created"].append(tool_input['file_path'])
+        elif tool_name == 'Edit' and 'file_path' in tool_input:
+            operations["edited"].append(tool_input['file_path'])
+        elif tool_name == 'Read' and 'file_path' in tool_input:
+            operations["read"].append(tool_input['file_path'])
+
+    return operations
+
+def identify_issues(stats: Dict, delegations: List, file_ops: Dict, tool_uses: List) -> List[str]:
+    """Identify common orchestration issues."""
+    issues = []
+
+    # Issue 1: No delegations
+    if len(delegations) == 0:
+        issues.append("❌ NO DELEGATION: Orchestrator never delegated to subagents")
+
+    # Issue 2: No files created
+    if len(file_ops["created"]) == 0:
+        issues.append("❌ NO FILES CREATED: Migration produced no output files")
+
+    # Issue 3: Excessive tool use without delegation
+    tool_use_count = len(tool_uses)
+    if tool_use_count > 10 and len(delegations) == 0:
+        issues.append(f"⚠️  MICRO-MANAGING: {tool_use_count} tool calls without delegation")
+
+    # Issue 4: TodoWrite overhead
+    todo_count = sum(1 for tool in tool_uses if tool['name'] == 'TodoWrite')
+    if todo_count > 0:
+        issues.append(f"⚠️  TODO OVERHEAD: {todo_count} TodoWrite calls")
+
+    # Issue 5: Excessive exploration (Bash commands)
+    bash_count = sum(1 for tool in tool_uses if tool['name'] == 'Bash')
+    if bash_count > 5:
+        issues.append(f"⚠️  EXCESSIVE EXPLORATION: {bash_count} Bash discovery commands")
+
+    return issues
+
+def parse_log_file(log_path: Path) -> Dict:
+    """Parse log file and extract all data."""
 
     with open(log_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Split by iteration markers
-    iterations = re.split(r'ITERATION \d+ \|', content)
-
-    # Storage for different message types
-    chunks = {
-        'system_messages': [],
-        'assistant_messages': [],
-        'user_messages': [],
-        'tool_uses': [],
-        'tool_results': [],
-        'timing_info': [],
-        'model_info': [],
-        'subagent_responses': []
+    # Statistics
+    stats = {
+        'total_lines': 0,
+        'system_messages': 0,
+        'assistant_messages': 0,
+        'user_messages': 0,
+        'result_messages': 0
     }
 
-    # Counters
-    stats = defaultdict(int)
+    tool_uses = []
+    result_data = None
 
     # Parse each line
     for line in content.split('\n'):
-        # Skip empty lines
         if not line.strip():
             continue
 
-        # System Messages
-        if 'SystemMessage' in line and 'subtype=' in line:
-            chunks['system_messages'].append(line)
-            stats['system_message'] += 1
+        stats['total_lines'] += 1
 
-        # Assistant Messages (Claude responses)
-        elif 'AssistantMessage' in line and 'model=' in line:
-            chunks['assistant_messages'].append(line)
-            stats['assistant_message'] += 1
+        # Parse the message
+        parsed = parse_log_line(line)
+        if not parsed:
+            continue
 
-            # Check if it's a subagent
-            if 'parent_tool_use_id=' in line and "parent_tool_use_id=None" not in line:
-                chunks['subagent_responses'].append(line)
-                stats['subagent_response'] += 1
+        msg_type, msg_content = parsed
 
-        # User Messages (tool results)
-        elif 'UserMessage' in line and 'ToolResultBlock' in line:
-            chunks['user_messages'].append(line)
-            stats['user_message'] += 1
+        # Count message types
+        if msg_type == 'SystemMessage':
+            stats['system_messages'] += 1
+        elif msg_type == 'AssistantMessage':
+            stats['assistant_messages'] += 1
+            # Extract tool uses from AssistantMessage
+            tools = extract_tool_uses_from_line(line)
+            tool_uses.extend(tools)
+        elif msg_type == 'UserMessage':
+            stats['user_messages'] += 1
+        elif msg_type == 'ResultMessage':
+            stats['result_messages'] += 1
+            # Extract cost and usage data
+            result_data = extract_result_message_data(line)
 
-        # Tool Uses
-        elif 'ToolUseBlock' in line and 'name=' in line:
-            chunks['tool_uses'].append(line)
-            stats['tool_use'] += 1
+    # Derived analysis
+    delegations = extract_delegations(tool_uses)
+    file_ops = extract_file_operations(tool_uses)
+    issues = identify_issues(stats, delegations, file_ops, tool_uses)
 
-        # Tool Results
-        elif 'ToolResultBlock' in line and 'tool_use_id=' in line:
-            chunks['tool_results'].append(line)
-            stats['tool_result'] += 1
+    # Tool counts
+    tool_counts = defaultdict(int)
+    for tool in tool_uses:
+        tool_counts[tool['name']] += 1
 
-        # Timing information
-        elif 'Iteration' in line and 'took:' in line:
-            chunks['timing_info'].append(line)
-            stats['timing'] += 1
+    return {
+        "stats": stats,
+        "tool_uses": tool_uses,
+        "tool_counts": dict(tool_counts),
+        "delegations": delegations,
+        "file_ops": file_ops,
+        "result_data": result_data or {},
+        "issues": issues
+    }
 
-        # Model information
-        elif 'Using agent model' in line and ("sonnet" in line or "haiku" in line) and ('msg_model' in line and not "msg_model N/A" in line):
-            chunks['model_info'].append(line)
-            stats['model_info'] += 1
+def create_diagnostic_report(output_dir: Path, analysis: Dict):
+    """Create comprehensive diagnostic report."""
+    report_file = output_dir / "00_DIAGNOSTIC_REPORT.md"
 
-        # Subagent responses
-        elif 'Subagent response' in line:
-            chunks['subagent_responses'].append(line)
-
-    return chunks, stats
-
-def extract_tools_used(chunks):
-    """Extract unique tools used from tool_uses."""
-    tools = set()
-    for line in chunks['tool_uses']:
-        match = re.search(r"name='([^']+)'", line)
-        if match:
-            tools.add(match.group(1))
-    return sorted(tools)
-
-def extract_models_used(chunks):
-    """Extract unique models used."""
-    models = set()
-    for line in chunks['model_info'] + chunks['assistant_messages']:
-        # Look for model patterns
-        match = re.search(r"model='([^']+)'", line)
-        if match:
-            models.add(match.group(1))
-    return sorted(models)
-
-def write_chunk_file(output_dir: Path, name: str, lines: list, header: str):
-    """Write a chunk to a separate file."""
-    output_file = output_dir / f"{name}.log"
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(f"{'='*80}\n")
-        f.write(f"{header}\n")
-        f.write(f"Total entries: {len(lines)}\n")
-        f.write(f"{'='*80}\n\n")
-
-        for i, line in enumerate(lines, 1):
-            f.write(f"{i:4d}. {line}\n")
-
-    print(f"✓ Created: {output_file.name} ({len(lines)} entries)")
-
-def create_summary_report(output_dir: Path, stats: dict, tools: list, models: list, chunks: dict):
-    """Create a comprehensive summary report."""
-    summary_file = output_dir / "00_SUMMARY.md"
-
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        f.write("# Log Analysis Summary\n\n")
+    with open(report_file, 'w', encoding='utf-8') as f:
+        f.write("# Orchestration Diagnostic Report\n\n")
         f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("---\n\n")
 
-        # Statistics
-        f.write("## Message Statistics\n\n")
-        f.write("| Message Type | Count |\n")
-        f.write("|--------------|-------|\n")
-        for msg_type, count in sorted(stats.items()):
-            f.write(f"| {msg_type.replace('_', ' ').title()} | {count} |\n")
-        f.write(f"\n**Total Messages**: {sum(stats.values())}\n\n")
+        # Issues Section (Most Important)
+        f.write("## 🚨 Issues Detected\n\n")
+        if analysis["issues"]:
+            for issue in analysis["issues"]:
+                f.write(f"{issue}\n")
+        else:
+            f.write("✅ No major issues detected\n")
+        f.write("\n---\n\n")
 
-        # Tools Used
-        f.write("## Tools Used\n\n")
-        for tool in tools:
-            tool_count = sum(1 for line in chunks['tool_uses'] if f"name='{tool}'" in line)
-            f.write(f"- **{tool}**: {tool_count} times\n")
-        f.write(f"\n**Total Unique Tools**: {len(tools)}\n\n")
+        # Executive Summary
+        f.write("## 📊 Executive Summary\n\n")
+        f.write(f"- **Total Messages**: {sum(analysis['stats'].values())}\n")
+        f.write(f"- **Tool Calls**: {len(analysis['tool_uses'])}\n")
+        f.write(f"- **Delegations**: {len(analysis['delegations'])}\n")
+        f.write(f"- **Files Created**: {len(analysis['file_ops']['created'])}\n")
+        f.write(f"- **Files Edited**: {len(analysis['file_ops']['edited'])}\n")
 
-        # Models Used
-        f.write("## Models Used\n\n")
-        for model in models:
-            f.write(f"- `{model}`\n")
-        f.write(f"\n**Total Models**: {len(models)}\n\n")
+        if analysis['result_data']:
+            result = analysis['result_data']
+            f.write(f"- **Cost**: ${result.get('cost_usd', 0):.4f}\n")
+            f.write(f"- **Turns**: {result.get('num_turns', 0)}\n")
+            f.write(f"- **Input Tokens**: {result.get('input_tokens', 0):,}\n")
+            f.write(f"- **Output Tokens**: {result.get('output_tokens', 0):,}\n")
+            f.write(f"- **Cache Read**: {result.get('cache_read_tokens', 0):,}\n")
+            f.write(f"- **Cache Creation**: {result.get('cache_creation_tokens', 0):,}\n")
 
-        # File Organization
-        f.write("## Generated Files\n\n")
-        f.write("The log has been split into the following files:\n\n")
-        f.write("1. **01_system_messages.log** - System initialization messages\n")
-        f.write("2. **02_assistant_messages.log** - Claude's responses (orchestrator)\n")
-        f.write("3. **03_user_messages.log** - Tool execution results\n")
-        f.write("4. **04_tool_uses.log** - All tool invocations\n")
-        f.write("5. **05_tool_results.log** - Tool execution outputs\n")
-        f.write("6. **06_subagent_responses.log** - Subagent communications\n")
-        f.write("7. **07_timing_info.log** - Performance metrics per iteration\n")
-        f.write("8. **08_model_info.log** - Model usage information\n\n")
+        f.write("\n---\n\n")
 
-        # Timing Analysis
-        f.write("## Timing Analysis\n\n")
-        timings = []
-        for line in chunks['timing_info']:
-            match = re.search(r'(\d+\.\d+)s', line)
-            if match:
-                timings.append(float(match.group(1)))
+        # Delegation Timeline
+        f.write("## Delegation Timeline\n\n")
+        if analysis['delegations']:
+            for i, deleg in enumerate(analysis['delegations'], 1):
+                f.write(f"### Delegation {i}: {deleg['subagent']}\n\n")
+                f.write(f"- **Description**: {deleg['description']}\n")
+                f.write(f"- **Model**: {deleg['model']}\n")
+                f.write(f"- **Prompt Preview**: {deleg['prompt_preview']}\n")
+                f.write("\n")
+        else:
+            f.write("⚠️  **No delegations occurred**\n\n")
 
-        if timings:
-            f.write(f"- **Total Iterations**: {len(timings)}\n")
-            f.write(f"- **Average Time**: {sum(timings)/len(timings):.3f}s\n")
-            f.write(f"- **Fastest Iteration**: {min(timings):.3f}s\n")
-            f.write(f"- **Slowest Iteration**: {max(timings):.3f}s\n")
-            f.write(f"- **Total Time**: {sum(timings):.2f}s\n\n")
+        f.write("\n---\n\n")
 
-        # Subagent Analysis
-        f.write("## Subagent Analysis\n\n")
-        subagent_models = [m for m in models if 'haiku' in m.lower()]
-        orchestrator_models = [m for m in models if 'sonnet' in m.lower()]
+        # File Operations
+        f.write("## 📁 File Operations\n\n")
+        if analysis['file_ops']['created']:
+            f.write("### Files Created\n\n")
+            for file in analysis['file_ops']['created']:
+                f.write(f"- `{file}`\n")
+            f.write("\n")
+        else:
+            f.write("⚠️  **No files were created**\n\n")
 
-        f.write(f"- **Orchestrator Models**: {', '.join(orchestrator_models) if orchestrator_models else 'N/A'}\n")
-        f.write(f"- **Subagent Models**: {', '.join(subagent_models) if subagent_models else 'N/A'}\n")
-        f.write(f"- **Subagent Responses**: {stats.get('subagent_response', 0)}\n\n")
+        if analysis['file_ops']['edited']:
+            f.write("### Files Edited\n\n")
+            for file in analysis['file_ops']['edited']:
+                f.write(f"- `{file}`\n")
+            f.write("\n")
 
         f.write("---\n\n")
-        f.write("## How to Use These Files\n\n")
-        f.write("Each log file contains organized entries for a specific message type.\n")
-        f.write("Use them to:\n\n")
-        f.write("- **Debug**: Track specific tool calls and their results\n")
-        f.write("- **Performance**: Analyze timing patterns\n")
-        f.write("- **Flow**: Understand orchestrator → subagent communication\n")
-        f.write("- **Optimization**: Identify slow operations or redundant calls\n\n")
 
-    print(f"✓ Created: {summary_file.name}")
+        # Tool Usage Summary
+        f.write("## 🔧 Tool Usage Summary\n\n")
+        for tool_name in sorted(analysis['tool_counts'].keys()):
+            count = analysis['tool_counts'][tool_name]
+            f.write(f"- **{tool_name}**: {count} times\n")
+
+        f.write("\n---\n\n")
+
+        # Recommendations
+        f.write("## 💡 Recommendations\n\n")
+
+        if len(analysis['delegations']) == 0:
+            f.write("- ❌ **Add delegation**: Orchestrator should delegate to subagents immediately\n")
+
+        if len(analysis['file_ops']['created']) == 0:
+            f.write("- ❌ **Enable file creation**: Ensure subagents have Write/Edit tool access\n")
+
+        bash_count = analysis['tool_counts'].get('Bash', 0)
+        if bash_count > 5:
+            f.write(f"- ⚠️  **Reduce exploration**: {bash_count} Bash commands indicate micro-managing\n")
+
+        if not analysis['issues']:
+            f.write("✅ Session executed successfully with no major issues\n")
+
+        f.write("\n")
+
+    print(f"✓ Created: {report_file.name}")
+
+def write_tool_details(output_dir: Path, analysis: Dict):
+    """Write detailed tool execution log."""
+    tools_file = output_dir / "01_tool_details.log"
+
+    with open(tools_file, 'w', encoding='utf-8') as f:
+        f.write("="*80 + "\n")
+        f.write("Tool Execution Details\n")
+        f.write("="*80 + "\n\n")
+
+        if analysis['tool_uses']:
+            for i, tool in enumerate(analysis['tool_uses'], 1):
+                f.write(f"{i}. {tool['name']}\n")
+                f.write(f"   ID: {tool['id']}\n")
+                if tool['input']:
+                    f.write(f"   Input: {tool['input']}\n")
+                f.write("\n")
+        else:
+            f.write("No tool uses found.\n")
+
+    print(f"✓ Created: {tools_file.name}")
+
+def write_delegation_details(output_dir: Path, analysis: Dict):
+    """Write delegation details if any exist."""
+    if not analysis['delegations']:
+        return
+
+    deleg_file = output_dir / "02_delegations.log"
+
+    with open(deleg_file, 'w', encoding='utf-8') as f:
+        f.write("="*80 + "\n")
+        f.write("Delegation Events\n")
+        f.write("="*80 + "\n\n")
+
+        for i, deleg in enumerate(analysis['delegations'], 1):
+            f.write(f"Delegation {i}\n")
+            f.write(f"  Subagent: {deleg['subagent']}\n")
+            f.write(f"  Model: {deleg['model']}\n")
+            f.write(f"  Description: {deleg['description']}\n")
+            f.write(f"  Prompt Preview: {deleg['prompt_preview']}\n")
+            f.write("\n")
+
+    print(f"✓ Created: {deleg_file.name}")
 
 def main():
     """Main execution."""
@@ -202,51 +397,54 @@ def main():
     output_dir = project_root / "logs" / "analyzed"
 
     print("="*80)
-    print("Log Analyzer - Organizing Verbose Logs")
+    print("Enhanced Log Analyzer - Claude Agent SDK Logs")
     print("="*80)
     print(f"\nInput: {log_path}")
     print(f"Output Directory: {output_dir}\n")
+
+    if not log_path.exists():
+        print(f"❌ Error: Log file not found at {log_path}")
+        print(f"\nSearching for alternative log files...")
+
+        # Search for any log file with "copy" in name
+        log_dir = project_root / "logs"
+        alt_logs = list(log_dir.glob("*log_to_file*.log"))
+        if alt_logs:
+            log_path = alt_logs[0]
+            print(f"✓ Found: {log_path}")
+        else:
+            print(f"❌ No log files found in {log_dir}")
+            return
 
     # Create output directory
     output_dir.mkdir(exist_ok=True)
 
     # Parse the log
     print("Parsing log file...")
-    chunks, stats = parse_log_file(log_path)
+    analysis = parse_log_file(log_path)
 
-    # Extract metadata
-    tools = extract_tools_used(chunks)
-    models = extract_models_used(chunks)
+    print(f"✓ Parsed {analysis['stats']['total_lines']} log lines\n")
 
-    print(f"✓ Parsed {sum(stats.values())} total log entries\n")
+    # Create reports
+    print("Creating diagnostic report...")
+    create_diagnostic_report(output_dir, analysis)
 
-    # Write chunk files
-    print("Creating organized log files...")
-    write_chunk_file(output_dir, "01_system_messages", chunks['system_messages'],
-                     "System Messages - Initialization & Configuration")
-    write_chunk_file(output_dir, "02_assistant_messages", chunks['assistant_messages'],
-                     "Assistant Messages - Claude Orchestrator Responses")
-    write_chunk_file(output_dir, "03_user_messages", chunks['user_messages'],
-                     "User Messages - Tool Execution Results")
-    write_chunk_file(output_dir, "04_tool_uses", chunks['tool_uses'],
-                     "Tool Uses - All Tool Invocations")
-    write_chunk_file(output_dir, "05_tool_results", chunks['tool_results'],
-                     "Tool Results - Tool Execution Outputs")
-    write_chunk_file(output_dir, "06_subagent_responses", chunks['subagent_responses'],
-                     "Subagent Responses - Specialized Agent Communications")
-    write_chunk_file(output_dir, "07_timing_info", chunks['timing_info'],
-                     "Timing Information - Performance Metrics")
-    write_chunk_file(output_dir, "08_model_info", chunks['model_info'],
-                     "Model Information - Model Usage Details")
-
-    print("\nCreating summary report...")
-    create_summary_report(output_dir, stats, tools, models, chunks)
+    print("\nCreating detailed logs...")
+    write_tool_details(output_dir, analysis)
+    write_delegation_details(output_dir, analysis)
 
     print("\n" + "="*80)
-    print("✅ Log analysis complete!")
+    print("✅ Analysis complete!")
     print("="*80)
     print(f"\nOrganized logs saved to: {output_dir}/")
-    print(f"Start with: {output_dir}/00_SUMMARY.md")
+    print(f"Start with: {output_dir}/00_DIAGNOSTIC_REPORT.md")
+    print("\n🔍 Issues detected:")
+    if analysis['issues']:
+        for issue in analysis['issues']:
+            print(f"   {issue}")
+    else:
+        print("   ✅ No major issues detected")
+    print()
 
 if __name__ == "__main__":
     main()

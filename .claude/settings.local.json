@@ -39,7 +39,9 @@
       "Bash(brew install flake8)",
       "Bash(brew install autopep8)",
       "Bash(autopep8:*)",
-      "Bash(truncate:*)"
+      "Bash(truncate:*)",
+      "Read(//home/dev/claude_dev/airflow/data-airflow/dags/marketo_dag_test/**)",
+      "Read(//home/dev/claude_dev/airflow/data-airflow/dags/invoca_signals/**)"
     ],
     "deny": [],
     "ask": []

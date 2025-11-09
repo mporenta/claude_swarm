@@ -22,7 +22,7 @@ Persist confirmed URLs (e.g., `.env` `CLAUDE_AGENT_SDK_DOCS_URL=...`) and echo t
   - `python --version`
   - `node --version`
   - `claude-code --version`
-- Install SDK if needed: `pip install -U claude-agent-sdk`
+- Install SDK if needed: `pip install -U claude-agent-sdk` 
 
 ---
 
